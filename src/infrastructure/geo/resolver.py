@@ -14,7 +14,9 @@ from loguru import logger
 class GeoResolver:
     """Extract location strings from text and resolve to coordinates."""
 
-    pattern: Pattern[str] = re.compile(r"en\s+([A-Za-zÁÉÍÓÚáéíóúñÑüÜ\s]+)")
+    pattern: Pattern[str] = re.compile(
+        r"en\s+([A-Za-zÁÉÍÓÚáéíóúñÑüÜ0-9°º.,-]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑüÜ0-9°º.,-]+)*)"
+    )
     user_agent: str = "movilidad-inteligente-nlp"
 
     def __post_init__(self) -> None:
@@ -26,17 +28,24 @@ class GeoResolver:
         if not match:
             return None, None, None
 
-        location_name = match.group(1).strip()
+        location_name = re.sub(r"\s+", " ", match.group(1)).strip(" ,.-")
         logger.debug("Detected location string: {}", location_name)
 
         try:
-            location = self._geolocator.geocode(location_name, language="es")
+            location = self._geolocator.geocode(
+                location_name, language="es", country_codes="do"
+            )
         except (GeocoderServiceError, ValueError) as error:
             logger.warning("Geocoding failed for {}: {}", location_name, error)
             return location_name, None, None
 
         if location is None:
             logger.info("No coordinates found for {}", location_name)
+            return location_name, None, None
+
+        address = getattr(location, "raw", {}).get("address", {})
+        if address.get("country_code") != "do":
+            logger.info("Discarded location {} outside Dominican Republic", location_name)
             return location_name, None, None
 
         logger.debug("Resolved {} to ({}, {})", location_name, location.latitude, location.longitude)

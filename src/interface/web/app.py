@@ -110,6 +110,9 @@ def render_event_table(events: Sequence[TrafficEvent]) -> None:
 
     rows: list[dict[str, str | float | None]] = []
     for event in events:
+        map_link = ""
+        if event.latitude is not None and event.longitude is not None:
+            map_link = f"https://www.google.com/maps?q={event.latitude},{event.longitude}"
         row: dict[str, str | float | None] = {
             "Texto": event.text,
             "Categoría": event.predicted_category,
@@ -117,11 +120,20 @@ def render_event_table(events: Sequence[TrafficEvent]) -> None:
             "Lat": event.latitude,
             "Lon": event.longitude,
             "Severidad": event.severity or "N/A",
+            "Mapa": map_link,
         }
         rows.append(row)
 
     df: pd.DataFrame = pd.DataFrame(rows)
-    st.dataframe(df, width='stretch') # type: ignore
+    st.dataframe(
+        df,
+        width="stretch",
+        column_config={
+            "Mapa": st.column_config.LinkColumn(
+                "Mapa", display_text="Abrir en Google Maps"
+            )
+        },
+    )
 
     severe_events = [
         event
