@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -9,6 +10,18 @@ import pandas as pd
 import yaml
 from loguru import logger
 from sklearn.model_selection import train_test_split
+
+
+def _ensure_project_root_on_path() -> None:
+    """Guarantee that the repository root is importable as a package root."""
+
+    project_root = Path(__file__).resolve().parents[1]
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+
+
+_ensure_project_root_on_path()
 
 from src.utils.text_cleaning import clean_text, ensure_stopwords
 
