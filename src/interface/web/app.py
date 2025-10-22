@@ -121,11 +121,7 @@ def render_event_table(events: Sequence[TrafficEvent]) -> None:
         rows.append(row)
 
     df: pd.DataFrame = pd.DataFrame(rows)
-    dataframe: Callable[..., DeltaGenerator] = cast(
-        Callable[..., DeltaGenerator],
-        st.dataframe,
-    )
-    dataframe(df, width="stretch")
+    st.dataframe(df, use_container_width=True)
 
     severe_events = [
         event
