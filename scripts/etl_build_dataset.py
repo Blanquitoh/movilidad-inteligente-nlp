@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import pandas as pd
 import yaml
@@ -115,13 +115,27 @@ def load_raw_data(raw_source: str | Path | Sequence[str | Path]) -> pd.DataFrame
     return pd.concat(frames, ignore_index=True)
 
 
+def _is_flagged(value: Any) -> bool:
+    if pd.isna(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalised = value.strip().lower()
+        if normalised in {"true", "t", "1", "yes", "y"}:
+            return True
+        if normalised in {"false", "f", "0", "no", "n", ""}:
+            return False
+    return bool(value)
+
+
 def derive_category_from_flags(row: pd.Series) -> str:
     """Map boolean incident flags into a human-readable category."""
     for column, label in PANAMA_CATEGORY_PRIORITY:
-        if column in row:
-            value = row[column]
-            if pd.notna(value) and bool(value):
-                return label
+        if column in row and _is_flagged(row[column]):
+            return label
     return "informativo"
 
 
