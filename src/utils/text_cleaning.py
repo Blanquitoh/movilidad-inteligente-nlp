@@ -46,9 +46,11 @@ def clean_text(text: str, stopwords: Iterable[str] | None = None) -> str:
     text = _PUNCTUATION_PATTERN.sub(" ", text)
     text = _MULTISPACE_PATTERN.sub(" ", text).strip()
 
-    if stopwords:
-        tokens = [token for token in text.split() if token not in stopwords]
-        text = " ".join(tokens)
+    if stopwords is not None:
+        stopword_set = set(stopwords)
+        if stopword_set:
+            tokens = [token for token in text.split() if token not in stopword_set]
+            text = " ".join(tokens)
 
     logger.debug("Cleaned text: {}", text)
     return text
