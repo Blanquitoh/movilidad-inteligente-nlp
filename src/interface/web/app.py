@@ -3,21 +3,22 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import List
+from typing import Callable, Sequence, TypedDict, cast
 
 import pandas as pd
 import streamlit as st
 from loguru import logger
+from streamlit.delta_generator import DeltaGenerator
 
 CURRENT_FILE = Path(__file__).resolve()
 for candidate in CURRENT_FILE.parents:
     if (candidate / "pyproject.toml").exists():
-        PROJECT_ROOT = candidate
+        project_root = candidate
         break
 else:
-    PROJECT_ROOT = CURRENT_FILE.parents[3]
+    project_root = CURRENT_FILE.parents[3]
 
-project_root_str = str(PROJECT_ROOT)
+project_root_str = str(project_root)
 if project_root_str not in sys.path:
     sys.path.insert(0, project_root_str)
 
@@ -34,12 +35,26 @@ from src.use_cases.detect_events import DetectEventsUseCase
 from src.use_cases.recommend_topics import RecommendTopicsUseCase
 
 
+class PathsConfig(TypedDict, total=False):
+    model_artifact: str
+    recommendation_data: str
+
+
+class AppConfig(TypedDict, total=False):
+    paths: PathsConfig
+
+
 @st.cache_data
-def load_config(path: Path) -> dict:
+def load_config(path: Path) -> AppConfig:
     import yaml
 
     with path.open("r", encoding="utf-8") as file:
-        return yaml.safe_load(file)
+        data = yaml.safe_load(file)
+
+    if not isinstance(data, dict):
+        raise ValueError("The configuration file must contain a mapping at the top level.")
+
+    return cast(AppConfig, data)
 
 
 @st.cache_resource
@@ -58,32 +73,44 @@ def load_recommender(path: Path) -> ContentBasedRecommender:
         return ContentBasedRecommender(pd.DataFrame(columns=["category", "content"]))
 
 
-def create_use_cases(config: dict) -> tuple[DetectEventsUseCase, RecommendTopicsUseCase]:
+def create_use_cases(config: AppConfig) -> tuple[DetectEventsUseCase, RecommendTopicsUseCase]:
+    if "paths" not in config:
+        raise KeyError("Configuration is missing the 'paths' section.")
+
+    paths: PathsConfig = config["paths"]
     geo_resolver = GeoResolver()
     severity_scorer = KeywordSeverityScorer()
 
-    model_path = Path(config["paths"]["model_artifact"])
+    model_artifact = paths.get("model_artifact")
+    if model_artifact is None:
+        raise KeyError("Configuration 'paths' is missing the 'model_artifact' entry.")
+
+    model_path = Path(model_artifact)
     try:
-        classifier = load_classifier(model_path)
+        classifier: TextClassifierPipeline = load_classifier(model_path)
     except FileNotFoundError:
         classifier = load_classifier(model_path.with_suffix(""))
 
-    recommendation_path = Path(config["paths"]["recommendation_data"])
-    recommender = load_recommender(recommendation_path)
+    recommendation_data = paths.get("recommendation_data")
+    if recommendation_data is None:
+        raise KeyError("Configuration 'paths' is missing the 'recommendation_data' entry.")
+
+    recommendation_path = Path(recommendation_data)
+    recommender: ContentBasedRecommender = load_recommender(recommendation_path)
 
     detect_use_case = DetectEventsUseCase(classifier, geo_resolver, severity_scorer)
     recommend_use_case = RecommendTopicsUseCase(recommender)
     return detect_use_case, recommend_use_case
 
 
-def render_event_table(events: List[TrafficEvent]) -> None:
+def render_event_table(events: Sequence[TrafficEvent]) -> None:
     if not events:
         st.info("Ingresa un tweet para detectar eventos.")
         return
 
-    rows = []
+    rows: list[dict[str, str | float | None]] = []
     for event in events:
-        row = {
+        row: dict[str, str | float | None] = {
             "Texto": event.text,
             "Categoría": event.predicted_category,
             "Ubicación": event.location_name or "N/D",
@@ -93,10 +120,18 @@ def render_event_table(events: List[TrafficEvent]) -> None:
         }
         rows.append(row)
 
-    df = pd.DataFrame(rows)
-    st.dataframe(df, width='stretch')
+    df: pd.DataFrame = pd.DataFrame(rows)
+    dataframe: Callable[..., DeltaGenerator] = cast(
+        Callable[..., DeltaGenerator],
+        st.dataframe,
+    )
+    dataframe(df, width="stretch")
 
-    severe_events = [event for event in events if event.predicted_category == "accidente" and event.severity == "alta"]
+    severe_events = [
+        event
+        for event in events
+        if event.predicted_category == "accidente" and event.severity == "alta"
+    ]
     if severe_events:
         st.error("⚠️ Accidentes de alta severidad detectados. Toma precauciones.")
 
@@ -105,7 +140,7 @@ def main() -> None:
     st.set_page_config(page_title="Movilidad Inteligente NLP", layout="wide")
     st.title("🚦 Movilidad Inteligente: Detección de eventos de tráfico")
 
-    config = load_config(Path("configs/config.yaml"))
+    config: AppConfig = load_config(Path("configs/config.yaml"))
     detect_use_case, recommend_use_case = create_use_cases(config)
 
     with st.sidebar:
