@@ -9,7 +9,7 @@ def test_clean_text_removes_urls_and_mentions():
     cleaned = clean_text(text, stopwords={"en"})
     assert "http" not in cleaned
     assert "@" not in cleaned
-    assert "en" not in cleaned
+    assert "en" not in cleaned.split()
 
 
 def test_clean_text_handles_hashtags_and_punctuation():

@@ -16,6 +16,7 @@ _MULTISPACE_PATTERN = re.compile(r"\s+")
 
 def ensure_stopwords(language: str = "spanish") -> set[str]:
     """Ensure stopwords are available and return the set."""
+    fallback = {"de", "la", "en", "el"}
     try:
         nltk.data.find("corpora/stopwords")
     except LookupError:
@@ -24,10 +25,15 @@ def ensure_stopwords(language: str = "spanish") -> set[str]:
             nltk.download("stopwords", quiet=True)
         except Exception as error:  # noqa: BLE001
             logger.warning("Failed to download stopwords: {}", error)
-            return {"de", "la", "en", "el"}
+            return fallback
+
     from nltk.corpus import stopwords
 
-    return set(stopwords.words(language))
+    try:
+        return set(stopwords.words(language))
+    except LookupError as error:
+        logger.warning("Stopwords corpus unavailable: {}", error)
+        return fallback
 
 
 def clean_text(text: str, stopwords: Iterable[str] | None = None) -> str:

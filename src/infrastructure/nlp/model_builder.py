@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Iterable
 
@@ -75,10 +76,14 @@ class TextClassifierPipeline:
         return cls((vectorizer, model, label_encoder), use_neural=True)
 
 
+def _clean_batch(texts, stopwords):
+    return [clean_text(text, stopwords) for text in texts]
+
+
 def _build_cleaner():
     stopwords = ensure_stopwords()
     return FunctionTransformer(
-        lambda texts: [clean_text(text, stopwords) for text in texts],
+        func=partial(_clean_batch, stopwords=stopwords),
         validate=False,
     )
 
