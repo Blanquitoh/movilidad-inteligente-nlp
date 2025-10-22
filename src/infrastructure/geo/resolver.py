@@ -10,6 +10,13 @@ from geopy.exc import GeocoderServiceError
 from loguru import logger
 
 
+TERMINATOR_PATTERN = re.compile(r"[,;:](?:\s|$)")
+CONNECTOR_PATTERN = re.compile(
+    r"\b(?:cuando|donde|porque|por|debido a|tras|después de|luego de|ya que|mientras(?: que)?)\b",
+    re.IGNORECASE,
+)
+
+
 @dataclass
 class GeoResolver:
     """Extract location strings from text and resolve to coordinates."""
@@ -28,7 +35,7 @@ class GeoResolver:
         if not match:
             return None, None, None
 
-        location_name = re.sub(r"\s+", " ", match.group(1)).strip(" ,.-")
+        location_name = self._normalize_location_name(match.group(1))
         logger.debug("Detected location string: {}", location_name)
 
         try:
@@ -50,6 +57,21 @@ class GeoResolver:
 
         logger.debug("Resolved {} to ({}, {})", location_name, location.latitude, location.longitude)
         return location_name, location.latitude, location.longitude
+
+    def _normalize_location_name(self, raw_location: str) -> str:
+        """Reduce raw regex matches to the most relevant location span."""
+
+        normalized = re.sub(r"\s+", " ", raw_location).strip(" ,.-")
+        normalized = TERMINATOR_PATTERN.split(normalized, maxsplit=1)[0].strip(" ,.-")
+
+        connector_match = CONNECTOR_PATTERN.search(normalized)
+        if connector_match:
+            normalized = normalized[: connector_match.start()].rstrip(" ,.-")
+
+        if not normalized:
+            return re.sub(r"\s+", " ", raw_location).strip(" ,.-")
+
+        return normalized
 
 
 __all__ = ["GeoResolver"]
