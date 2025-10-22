@@ -121,7 +121,7 @@ def render_event_table(events: Sequence[TrafficEvent]) -> None:
         rows.append(row)
 
     df: pd.DataFrame = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width='stretch') # type: ignore
 
     severe_events = [
         event
