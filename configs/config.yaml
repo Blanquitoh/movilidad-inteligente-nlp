@@ -1,5 +1,5 @@
 paths:
-  raw_data: data/raw/panama_city_tweets.csv
+  raw_data: data/raw/panama_road_incidents
   recommendation_data: data/raw/social_media_preferences.csv
   sentiment_data: data/raw/spanish_tweet_sentiment.csv
   processed_train: data/processed/train.csv
