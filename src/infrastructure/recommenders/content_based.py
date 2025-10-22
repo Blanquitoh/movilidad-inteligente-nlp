@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import re
 
 import pandas as pd
 from loguru import logger
@@ -30,10 +31,17 @@ class _InterestLexicon:
 
     def detect(self, text: str) -> set[str]:
         lowered = text.lower()
+        tokens = set(re.findall(r"\b\w+\b", lowered, flags=re.UNICODE))
         matches: set[str] = set()
         for category, keywords in self.vocabulary.items():
-            if any(keyword in lowered for keyword in keywords):
-                matches.add(category)
+            for keyword in keywords:
+                if " " in keyword:
+                    if re.search(rf"\b{re.escape(keyword)}\b", lowered):
+                        matches.add(category)
+                        break
+                elif keyword in tokens:
+                    matches.add(category)
+                    break
         return matches
 
 
