@@ -11,7 +11,10 @@ def build_resolver(monkeypatch):
 
     geocode = Mock()
     geolocator = Mock(geocode=geocode)
-    monkeypatch.setattr("src.infrastructure.geo.resolver.Nominatim", lambda user_agent: geolocator)
+    monkeypatch.setattr(
+        "src.infrastructure.geo.resolver.Nominatim",
+        lambda user_agent, **kwargs: geolocator,
+    )
     resolver = GeoResolver()
     return resolver, geocode
 
@@ -26,9 +29,17 @@ def test_extract_location_trims_trailing_description(monkeypatch):
 
     location, lat, lon = resolver.extract_location(text)
 
-    assert location == "la Av. 27 de Febrero"
+    assert location == "Avenida 27 de Febrero"
     assert lat is None and lon is None
-    geocode.assert_called_once_with("la Av. 27 de Febrero", language="es", country_codes="do")
+
+    first_call = geocode.call_args_list[0]
+    assert first_call.args[0] == "Avenida 27 de Febrero"
+    assert first_call.kwargs == {
+        "language": "es",
+        "country_codes": "do",
+        "viewbox": resolver.viewbox,
+        "bounded": True,
+    }
 
 
 def test_extract_location_stops_at_connectors(monkeypatch):
@@ -39,6 +50,14 @@ def test_extract_location_stops_at_connectors(monkeypatch):
 
     location, lat, lon = resolver.extract_location(text)
 
-    assert location == "la avenida Luperón"
+    assert location == "avenida Luperón"
     assert lat is None and lon is None
-    geocode.assert_called_once_with("la avenida Luperón", language="es", country_codes="do")
+
+    first_call = geocode.call_args_list[0]
+    assert first_call.args[0] == "avenida Luperón"
+    assert first_call.kwargs == {
+        "language": "es",
+        "country_codes": "do",
+        "viewbox": resolver.viewbox,
+        "bounded": True,
+    }
