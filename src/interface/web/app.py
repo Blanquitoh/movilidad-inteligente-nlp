@@ -13,6 +13,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from scripts.bootstrap import bootstrap_project
+
+PROJECT_ROOT = bootstrap_project()
+
 from src.core.entities import TrafficEvent, UserProfile
 from src.infrastructure.geo.resolver import GeoResolver
 from src.infrastructure.nlp.model_builder import TextClassifierPipeline
