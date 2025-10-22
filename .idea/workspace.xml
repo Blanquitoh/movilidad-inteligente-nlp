@@ -4,7 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="052398a2-61f8-41c3-b221-6635967e04b1" name="Changes" comment="" />
+    <list default="true" id="052398a2-61f8-41c3-b221-6635967e04b1" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.venv/pyvenv.cfg" beforeDir="false" afterPath="$PROJECT_DIR$/.venv/pyvenv.cfg" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -78,7 +82,7 @@
       <updated>1761140737552</updated>
       <workItem from="1761141351094" duration="3068000" />
       <workItem from="1761145324887" duration="688000" />
-      <workItem from="1761146063358" duration="1835000" />
+      <workItem from="1761146063358" duration="6825000" />
     </task>
     <task id="LOCAL-00001">
       <option name="closed" value="true" />

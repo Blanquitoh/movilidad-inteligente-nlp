@@ -33,3 +33,6 @@ eda = ["jupyter", "seaborn"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.poetry]
+package-mode = false

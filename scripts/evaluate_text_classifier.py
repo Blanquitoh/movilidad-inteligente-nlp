@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -9,6 +10,16 @@ import pandas as pd
 import yaml
 from loguru import logger
 from sklearn.metrics import classification_report, confusion_matrix
+
+if __package__ is None or __package__ == "":
+    _SCRIPT_PARENT = Path(__file__).resolve().parents[1]
+    _SCRIPT_PARENT_STR = str(_SCRIPT_PARENT)
+    if _SCRIPT_PARENT_STR not in sys.path:
+        sys.path.insert(0, _SCRIPT_PARENT_STR)
+
+from scripts.bootstrap import bootstrap_project
+
+_PROJECT_ROOT = bootstrap_project()
 
 from src.infrastructure.nlp.model_builder import TextClassifierPipeline
 

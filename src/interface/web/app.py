@@ -9,9 +9,17 @@ import pandas as pd
 import streamlit as st
 from loguru import logger
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+CURRENT_FILE = Path(__file__).resolve()
+for candidate in CURRENT_FILE.parents:
+    if (candidate / "pyproject.toml").exists():
+        PROJECT_ROOT = candidate
+        break
+else:
+    PROJECT_ROOT = CURRENT_FILE.parents[3]
+
+project_root_str = str(PROJECT_ROOT)
+if project_root_str not in sys.path:
+    sys.path.insert(0, project_root_str)
 
 from scripts.bootstrap import bootstrap_project
 
@@ -86,7 +94,7 @@ def render_event_table(events: List[TrafficEvent]) -> None:
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width='stretch')
 
     severe_events = [event for event in events if event.predicted_category == "accidente" and event.severity == "alta"]
     if severe_events:
