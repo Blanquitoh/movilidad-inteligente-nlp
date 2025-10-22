@@ -22,9 +22,15 @@ class GeoResolver:
     """Extract location strings from text and resolve to coordinates."""
 
     pattern: Pattern[str] = re.compile(
-        r"en\s+([A-Za-zÁÉÍÓÚáéíóúñÑüÜ0-9°º.,-]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑüÜ0-9°º.,-]+)*)"
+        r"en\s+([A-Za-zÁÉÍÓÚáéíóúñÑüÜ0-9°º.,-]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑüÜ0-9°º.,-]+)*)",
+        re.IGNORECASE,
     )
     user_agent: str = "movilidad-inteligente-nlp"
+    timeout: int = 5
+    viewbox: tuple[tuple[float, float], tuple[float, float]] = (
+        (19.95, -72.05),  # North-West corner of the Dominican Republic
+        (17.35, -68.25),  # South-East corner of the Dominican Republic
+    )
 
     _ARTICLES: tuple[str, ...] = ("la", "el", "los", "las")
     _COMMON_LOCATION_PREFIXES: frozenset[str] = frozenset(
@@ -53,7 +59,7 @@ class GeoResolver:
     )
 
     def __post_init__(self) -> None:
-        self._geolocator = Nominatim(user_agent=self.user_agent)
+        self._geolocator = Nominatim(user_agent=self.user_agent, timeout=self.timeout)
 
     def extract_location(self, text: str) -> tuple[Optional[str], Optional[float], Optional[float]]:
         logger.debug("Extracting location from text: {}", text)
@@ -72,6 +78,8 @@ class GeoResolver:
                     candidate,
                     language="es",
                     country_codes="do",
+                    viewbox=self.viewbox,
+                    bounded=True,
                 )
             except (GeocoderServiceError, ValueError) as error:
                 logger.warning("Geocoding failed for {}: {}", candidate, error)
