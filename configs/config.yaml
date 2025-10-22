@@ -1,0 +1,16 @@
+paths:
+  raw_data: data/raw/panama_city_tweets.csv
+  recommendation_data: data/raw/social_media_preferences.csv
+  sentiment_data: data/raw/spanish_tweet_sentiment.csv
+  processed_train: data/processed/train.csv
+  processed_test: data/processed/test.csv
+  model_artifact: artifacts/text_classifier.joblib
+split:
+  test_size: 0.2
+  random_state: 42
+model:
+  max_features: 5000
+  C: 1.0
+  n_neurons: 0
+logging:
+  level: INFO

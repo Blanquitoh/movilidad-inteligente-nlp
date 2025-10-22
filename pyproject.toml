@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "movilidad-inteligente-nlp"
+version = "0.1.0"
+description = "Configurable NLP pipeline for detecting Spanish traffic events and recommending interests"
+authors = [
+  {name = "Data Science Team"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+  "pandas",
+  "scikit-learn",
+  "nltk",
+  "geopy",
+  "joblib",
+  "streamlit",
+  "pyyaml",
+  "matplotlib",
+  "wordcloud",
+  "loguru",
+  "numpy",
+  "scipy"
+]
+
+[project.optional-dependencies]
+nn = ["tensorflow"]
+eda = ["jupyter", "seaborn"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
