@@ -11,17 +11,15 @@ import yaml
 from loguru import logger
 from sklearn.model_selection import train_test_split
 
+if __package__ is None or __package__ == "":
+    _SCRIPT_PARENT = Path(__file__).resolve().parents[1]
+    _SCRIPT_PARENT_STR = str(_SCRIPT_PARENT)
+    if _SCRIPT_PARENT_STR not in sys.path:
+        sys.path.insert(0, _SCRIPT_PARENT_STR)
 
-def _ensure_project_root_on_path() -> None:
-    """Guarantee that the repository root is importable as a package root."""
+from scripts.bootstrap import bootstrap_project
 
-    project_root = Path(__file__).resolve().parents[1]
-    project_root_str = str(project_root)
-    if project_root_str not in sys.path:
-        sys.path.insert(0, project_root_str)
-
-
-_ensure_project_root_on_path()
+_PROJECT_ROOT = bootstrap_project()
 
 from src.utils.text_cleaning import clean_text, ensure_stopwords
 
