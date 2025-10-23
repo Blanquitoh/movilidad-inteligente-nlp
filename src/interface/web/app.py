@@ -14,8 +14,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit.delta_generator import DeltaGenerator
 
-from src.utils.logger import logger
-
 CURRENT_FILE = Path(__file__).resolve()
 for candidate in CURRENT_FILE.parents:
     if (candidate / "pyproject.toml").exists():
@@ -31,6 +29,8 @@ if project_root_str not in sys.path:
 from scripts.bootstrap import bootstrap_project
 
 PROJECT_ROOT = bootstrap_project()
+
+from src.utils.logger import logger
 
 from src.core.entities import TrafficEvent, UserProfile
 from src.infrastructure.events.priority import TimeSeverityPriorityAssessor
