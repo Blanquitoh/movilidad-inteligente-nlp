@@ -1,6 +1,7 @@
 """Streamlit interface for the mobility intelligent NLP project."""
 from __future__ import annotations
 
+import html
 import json
 import sys
 from datetime import datetime
@@ -258,8 +259,20 @@ def render_event_map(events: Sequence[TrafficEvent], *, api_key: Optional[str]) 
 def _build_google_map_html(
     points: Sequence[dict[str, object]], *, api_key: str, element_id: str
 ) -> str:
-    callback_name = f"initMap_{element_id}"
-    data_json = json.dumps(points, ensure_ascii=False)
+    callback_name = f"initMap_{element_id.replace('-', '_')}"
+
+    sanitized_points: list[dict[str, object]] = []
+    for point in points:
+        sanitized_point = dict(point)
+        text = sanitized_point.get("text")
+        if isinstance(text, str):
+            sanitized_point["text"] = html.escape(text, quote=False)
+        category = sanitized_point.get("category")
+        if isinstance(category, str):
+            sanitized_point["category"] = html.escape(category, quote=False)
+        sanitized_points.append(sanitized_point)
+
+    data_json = json.dumps(sanitized_points, ensure_ascii=False)
 
     return f"""
 <div id="{element_id}" style="height: 420px; border-radius: 12px; overflow: hidden;"></div>
