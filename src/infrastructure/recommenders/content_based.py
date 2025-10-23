@@ -4,11 +4,11 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 import re
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import pandas as pd
 
-from src.core.entities import UserProfile
+from src.core.entities import DetectedInterest, UserProfile
 from src.infrastructure.recommenders.segments import AgeSegmenter
 from src.utils.logger import logger
 
@@ -68,6 +68,50 @@ class _InterestLexicon:
         return matches
 
 
+@dataclass
+class KeywordInterestDetector:
+    """Detect high-level interests based on keyword occurrences."""
+
+    lexicon: _InterestLexicon
+
+    def detect(self, texts: Sequence[str], max_keywords: int = 5) -> list[DetectedInterest]:
+        aggregated = Counter()
+        keyword_counts: dict[str, Counter[str]] = {}
+
+        for raw_text in texts:
+            if not raw_text:
+                continue
+
+            lowered = raw_text.lower()
+            tokens = set(re.findall(r"\b\w+\b", lowered, flags=re.UNICODE))
+            matched_keywords: dict[str, set[str]] = {}
+
+            for category, keywords in self.lexicon.vocabulary.items():
+                for keyword in keywords:
+                    if " " in keyword:
+                        pattern = rf"\b{re.escape(keyword)}\b"
+                        if re.search(pattern, lowered):
+                            matched_keywords.setdefault(category, set()).add(keyword)
+                    elif keyword in tokens:
+                        matched_keywords.setdefault(category, set()).add(keyword)
+
+            for category, keywords in matched_keywords.items():
+                aggregated[category] += 1
+                counter = keyword_counts.setdefault(category, Counter())
+                for keyword in keywords:
+                    counter[keyword] += 1
+
+        detections: list[DetectedInterest] = []
+        for category, count in aggregated.most_common():
+            keywords_counter = keyword_counts.get(category, Counter())
+            top_keywords = tuple(
+                keyword for keyword, _ in keywords_counter.most_common(max(0, int(max_keywords)))
+            )
+            detections.append(DetectedInterest(name=category, score=count, keywords=top_keywords))
+
+        return detections
+
+
 class ContentBasedRecommender:
     """Recommend topics that overlap with the user's interests."""
 
@@ -77,10 +121,12 @@ class ContentBasedRecommender:
         lexicon: _InterestLexicon | None = None,
         age_segmenter: AgeSegmenter | None = None,
     ) -> None:
+        self._lexicon = lexicon or _InterestLexicon.default()
         self._age_segmenter = age_segmenter or AgeSegmenter.default()
+        self._interest_detector = KeywordInterestDetector(self._lexicon)
         self.catalog = self._normalise_catalog(
             catalog,
-            lexicon or _InterestLexicon.default(),
+            self._lexicon,
             age_segmenter=self._age_segmenter,
         )
 
@@ -194,5 +240,8 @@ class ContentBasedRecommender:
         )
         return sorted({category for category in categories if category})
 
+    def detect_interests(self, texts: Sequence[str], max_keywords: int = 5) -> list[DetectedInterest]:
+        return self._interest_detector.detect(texts, max_keywords=max_keywords)
 
-__all__ = ["ContentBasedRecommender"]
+
+__all__ = ["ContentBasedRecommender", "KeywordInterestDetector"]

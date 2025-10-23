@@ -32,4 +32,13 @@ class UserProfile:
     gender: Optional[str] = None
 
 
-__all__ = ["TrafficEvent", "UserProfile"]
+@dataclass(frozen=True)
+class DetectedInterest:
+    """Automatically inferred interest from a collection of user texts."""
+
+    name: str
+    score: int
+    keywords: tuple[str, ...] = ()
+
+
+__all__ = ["TrafficEvent", "UserProfile", "DetectedInterest"]

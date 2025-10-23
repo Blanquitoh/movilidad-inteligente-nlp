@@ -6,7 +6,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, Sequence, TypedDict, cast
+from typing import Optional, Sequence, TypedDict, cast
 from uuid import uuid4
 
 import pandas as pd
@@ -32,7 +32,7 @@ PROJECT_ROOT = bootstrap_project()
 
 from src.utils.logger import logger
 
-from src.core.entities import TrafficEvent, UserProfile
+from src.core.entities import DetectedInterest, TrafficEvent, UserProfile
 from src.infrastructure.events.priority import TimeSeverityPriorityAssessor
 from src.infrastructure.geo.resolver import GeoResolver
 from src.infrastructure.nlp.category_rules import KeywordCategoryResolver
@@ -41,6 +41,7 @@ from src.infrastructure.nlp.severity import KeywordSeverityScorer
 from src.infrastructure.recommenders.content_based import ContentBasedRecommender
 from src.infrastructure.recommenders.segments import AgeSegmenter
 from src.use_cases.detect_events import DetectEventsUseCase
+from src.use_cases.infer_interests import InferInterestsUseCase
 from src.use_cases.recommend_topics import RecommendTopicsUseCase
 
 
@@ -71,6 +72,8 @@ class AppConfig(TypedDict, total=False):
     paths: PathsConfig
     recommender: RecommenderConfig
     maps: MapsConfig
+    n_suggestions: int
+    top_keywords: int
 
 
 @st.cache_data
@@ -130,7 +133,9 @@ def get_google_maps_api_key(config: AppConfig) -> Optional[str]:
     return text_key or None
 
 
-def create_use_cases(config: AppConfig) -> tuple[DetectEventsUseCase, RecommendTopicsUseCase]:
+def create_use_cases(
+    config: AppConfig,
+) -> tuple[DetectEventsUseCase, RecommendTopicsUseCase, InferInterestsUseCase]:
     if "paths" not in config:
         raise KeyError("Configuration is missing the 'paths' section.")
 
@@ -169,7 +174,8 @@ def create_use_cases(config: AppConfig) -> tuple[DetectEventsUseCase, RecommendT
         priority_assessor=priority_assessor,
     )
     recommend_use_case = RecommendTopicsUseCase(recommender)
-    return detect_use_case, recommend_use_case
+    infer_interests_use_case = InferInterestsUseCase(recommender)
+    return detect_use_case, recommend_use_case, infer_interests_use_case
 
 
 def render_event_table(events: Sequence[TrafficEvent]) -> None:
@@ -357,12 +363,32 @@ def render_detection_section(
     render_event_map(events, api_key=maps_api_key)
 
 
-def render_recommendation_section(recommend_use_case: RecommendTopicsUseCase) -> None:
-    st.markdown("### 🎯 Recomendaciones personalizadas por perfil")
-    st.caption("Configura manualmente el perfil del usuario para descubrir intereses afines.")
+def _format_detected_interests(interests: Sequence[DetectedInterest]) -> pd.DataFrame:
+    rows: list[dict[str, str | int]] = []
+    for interest in interests:
+        keywords = ", ".join(interest.keywords) if interest.keywords else "—"
+        rows.append(
+            {
+                "Interés": interest.name.capitalize(),
+                "Coincidencias": interest.score,
+                "Palabras clave": keywords,
+            }
+        )
 
-    available_topics = recommend_use_case.available_topics()
-    default_selection = available_topics[:3]
+    return pd.DataFrame(rows, columns=["Interés", "Coincidencias", "Palabras clave"])
+
+
+def render_recommendation_section(
+    recommend_use_case: RecommendTopicsUseCase,
+    infer_interests_use_case: InferInterestsUseCase,
+    *,
+    suggestions_limit: int,
+    top_keywords_limit: int,
+) -> None:
+    st.markdown("### 🎯 Recomendaciones personalizadas por perfil")
+    st.caption(
+        "Pega publicaciones o tweets del usuario para identificar intereses automáticamente y descubrir temas afines."
+    )
 
     with st.form("recommendation-form"):
         col1, col2 = st.columns([2, 1])
@@ -371,67 +397,72 @@ def render_recommendation_section(recommend_use_case: RecommendTopicsUseCase) ->
         with col2:
             omit_age = st.checkbox("Omitir edad", value=False)
 
+        posts_input = st.text_area(
+            "Publicaciones del usuario (una por línea)",
+            height=220,
+            placeholder="Ejemplo: Me encanta salir a correr al amanecer...",
+        )
+
         age_value_input = st.number_input("Edad", min_value=0, max_value=120, value=29, step=1)
         gender_option = st.selectbox(
             "Género",
             options=("Prefiero no decirlo", "Femenino", "Masculino", "Otro"),
             index=0,
         )
-        interests_selection = st.multiselect(
-            "Selecciona intereses principales",
-            options=available_topics,
-            default=default_selection,
-            help="Selecciona categorías detectadas en el catálogo de recomendaciones.",
-        )
-        custom_interests_text = st.text_input(
-            "Intereses adicionales (separados por coma)",
-            placeholder="ej. movilidad sostenible, ciclismo urbano",
-        )
-        top_k = st.slider("Cantidad de sugerencias", min_value=1, max_value=10, value=5)
         submitted = st.form_submit_button("Generar recomendaciones", use_container_width=True)
 
     if not submitted:
+        return
+
+    posts = [line.strip() for line in posts_input.splitlines() if line.strip()]
+    if not posts:
+        st.warning("Ingresa al menos una publicación para analizar los intereses del usuario.")
         return
 
     identifier = user_identifier.strip() or "usuario_demo"
     age_value: Optional[int] = None if omit_age else int(age_value_input)
     gender_value = None if gender_option == "Prefiero no decirlo" else gender_option.lower()
 
-    custom_interests = [interest.strip() for interest in custom_interests_text.split(",") if interest.strip()]
-    combined_interests = list(interests_selection) + custom_interests
+    with st.spinner("Detectando intereses automáticamente..."):
+        detected_interests = infer_interests_use_case.execute(posts, max_keywords=top_keywords_limit)
 
-    deduplicated: list[str] = []
-    seen: set[str] = set()
-    for interest in combined_interests:
-        normalized = interest.strip().lower()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        deduplicated.append(normalized)
-
-    if not deduplicated:
-        st.warning("Selecciona o ingresa al menos un interés para generar recomendaciones.")
-        return
-
-    profile = UserProfile(user_id=identifier, interests=deduplicated, age=age_value, gender=gender_value)
-
-    with st.spinner("Buscando coincidencias en el catálogo de intereses..."):
-        topics = recommend_use_case.execute(profile, top_k=top_k)
-
-    if not topics:
+    if not detected_interests:
         st.info(
-            "No se encontraron recomendaciones para el perfil ingresado. Ajusta los intereses e inténtalo nuevamente."
+            "No se detectaron intereses en los textos proporcionados. Intenta con publicaciones más descriptivas."
         )
         return
 
-    col1, col2 = st.columns(2)
-    col1.metric("Intereses ingresados", len(deduplicated))
-    col2.metric("Temas sugeridos", len(topics))
+    st.markdown("### Intereses detectados automáticamente")
+    interests_table = _format_detected_interests(detected_interests)
+    st.dataframe(interests_table, use_container_width=True)
 
-    st.success("¡Perfil listo! Estos son los temas sugeridos:")
-    recommendations_md = "\n".join(f"- ✅ **{topic}**" for topic in topics)
+    profile_interests = [interest.name for interest in detected_interests]
+    profile = UserProfile(
+        user_id=identifier,
+        interests=profile_interests,
+        age=age_value,
+        gender=gender_value,
+    )
+
+    with st.spinner("Generando recomendaciones personalizadas..."):
+        topics = recommend_use_case.execute(profile, top_k=max(1, suggestions_limit))
+
+    col1, col2 = st.columns(2)
+    col1.metric("Publicaciones analizadas", len(posts))
+    col2.metric("Intereses detectados", len(detected_interests))
+
+    st.markdown("### Recomendaciones sugeridas")
+    if not topics:
+        st.info(
+            "No se encontraron recomendaciones para los intereses detectados. Intenta con más publicaciones o textos diferentes."
+        )
+        return
+
+    recommendations_md = "\n".join(f"- 🎯 **{topic}**" for topic in topics)
     st.markdown(recommendations_md)
-    st.caption("Las sugerencias se basan en coincidencias con intereses detectados en el catálogo de contenido disponible.")
+    st.caption(
+        "Las sugerencias se generan a partir del catálogo de contenidos y los intereses identificados automáticamente."
+    )
 
 
 def main() -> None:
@@ -439,8 +470,10 @@ def main() -> None:
     st.title("🚦 Movilidad Inteligente: Detección de eventos de tráfico")
 
     config: AppConfig = load_config(Path("configs/config.yaml"))
-    detect_use_case, recommend_use_case = create_use_cases(config)
+    detect_use_case, recommend_use_case, infer_interests_use_case = create_use_cases(config)
     maps_api_key = get_google_maps_api_key(config)
+    suggestions_limit = int(config.get("n_suggestions", 5) or 5)
+    top_keywords_limit = int(config.get("top_keywords", 5) or 5)
 
     detection_tab, recommendation_tab = st.tabs([
         "Detección de eventos",
@@ -451,7 +484,12 @@ def main() -> None:
         render_detection_section(detect_use_case, maps_api_key)
 
     with recommendation_tab:
-        render_recommendation_section(recommend_use_case)
+        render_recommendation_section(
+            recommend_use_case,
+            infer_interests_use_case,
+            suggestions_limit=suggestions_limit,
+            top_keywords_limit=top_keywords_limit,
+        )
 
 
 if __name__ == "__main__":
