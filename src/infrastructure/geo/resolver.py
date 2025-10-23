@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
-from typing import Iterable, Optional, Pattern
+from typing import Iterable, Mapping, Optional, Pattern
 
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderServiceError
@@ -99,16 +100,15 @@ class GeoResolver:
 
         queries = self._build_candidate_queries(location_name)
         location = None
+        viewbox = self._format_viewbox()
+
         for candidate in queries:
             try:
                 location = self._geolocator.geocode(
                     candidate,
                     language="es",
                     country_codes="do",
-                    viewbox=(
-                        self.viewbox[0][1], self.viewbox[0][0],  # west, north
-                        self.viewbox[1][1], self.viewbox[1][0],  # east, south
-                    ),
+                    viewbox=viewbox,
                     bounded=True,
                 )
             except (GeocoderServiceError, ValueError) as error:
@@ -123,7 +123,8 @@ class GeoResolver:
             return location_name, None, None
 
         address = getattr(location, "raw", {}).get("address", {})
-        if address.get("country_code") != "do":
+        country_code = self._infer_country_code(address)
+        if country_code and country_code != "do":
             logger.info("Discarded location {} outside Dominican Republic", location_name)
             return location_name, None, None
 
@@ -242,6 +243,44 @@ class GeoResolver:
             seen.add(key)
             unique.append(cleaned)
         return unique
+
+    def _format_viewbox(self) -> tuple[float, float, float, float]:
+        """Return the resolver viewbox as (west, south, east, north) floats."""
+        (lat1, lon1), (lat2, lon2) = self.viewbox
+
+        south = min(lat1, lat2)
+        north = max(lat1, lat2)
+        west = min(lon1, lon2)
+        east = max(lon1, lon2)
+
+        return (west, south, east, north)
+
+    @staticmethod
+    def _infer_country_code(address: Mapping[str, object]) -> Optional[str]:
+        """Detect the country code from a geopy address payload."""
+        if not isinstance(address, Mapping):
+            return None
+
+        raw_code = address.get("country_code")
+        if isinstance(raw_code, str) and raw_code.strip():
+            return raw_code.strip().lower()
+
+        country = address.get("country")
+        if isinstance(country, str):
+            normalized = country.casefold()
+            if "dominican republic" in normalized or "república dominicana" in normalized:
+                return "do"
+            normalized_no_accents = GeoResolver._strip_accents(normalized)
+            if "republica dominicana" in normalized_no_accents:
+                return "do"
+
+        return None
+
+    @staticmethod
+    def _strip_accents(value: str) -> str:
+        """Remove diacritics to ease string comparisons."""
+        normalized = unicodedata.normalize("NFKD", value)
+        return "".join(char for char in normalized if not unicodedata.combining(char))
 
 
 __all__ = ["GeoResolver"]

@@ -18,9 +18,12 @@ def build_resolver(monkeypatch):
     return resolver, geocode
 
 
-def make_location(lat: float, lon: float) -> Mock:
+def make_location(lat: float, lon: float, *, address: dict | None = None) -> Mock:
     """Return a mock geopy location with the given coordinates."""
-    return Mock(latitude=lat, longitude=lon, raw={"address": {"country_code": "do"}})
+    payload = {"country_code": "do"}
+    if address:
+        payload.update(address)
+    return Mock(latitude=lat, longitude=lon, raw={"address": payload})
 
 
 def assert_default_geocode_call(geocode: Mock, expected_query: str, resolver: GeoResolver) -> None:
@@ -33,12 +36,7 @@ def assert_default_geocode_call(geocode: Mock, expected_query: str, resolver: Ge
     assert kwargs["language"] == "es"
     assert kwargs["country_codes"] == "do"
     assert kwargs["bounded"] is True
-    expected_viewbox = (
-        resolver.viewbox[0][1],
-        resolver.viewbox[0][0],
-        resolver.viewbox[1][1],
-        resolver.viewbox[1][0],
-    )
+    expected_viewbox = resolver._format_viewbox()
     assert kwargs["viewbox"] == expected_viewbox
 
 
@@ -139,3 +137,60 @@ def test_extract_location_handles_elevado_without_preposition(monkeypatch):
     assert lon == -69.939215
 
     assert_default_geocode_call(geocode, "elevado de la 27 con Churchill", resolver)
+
+
+def test_extract_location_accepts_uppercase_country_code(monkeypatch):
+    resolver, geocode = build_resolver(monkeypatch)
+    responses = {
+        "Avenida Sabana Larga": make_location(
+            18.482, -69.85, address={"country_code": "DO"}
+        ),
+    }
+    geocode.side_effect = lambda query, **kwargs: responses.get(query)
+
+    text = "Choque en Avenida Sabana Larga próximo a la charles."
+
+    location, lat, lon = resolver.extract_location(text)
+
+    assert location == "Avenida Sabana Larga"
+    assert lat == 18.482
+    assert lon == -69.85
+    assert_default_geocode_call(geocode, "Avenida Sabana Larga", resolver)
+
+
+def test_extract_location_accepts_country_name_without_code(monkeypatch):
+    resolver, geocode = build_resolver(monkeypatch)
+    responses = {
+        "Avenida Sabana Larga": make_location(
+            18.482, -69.85, address={"country_code": "", "country": "República Dominicana"}
+        ),
+    }
+    geocode.side_effect = lambda query, **kwargs: responses.get(query)
+
+    text = "Tránsito pesado sobre Avenida Sabana Larga."
+
+    location, lat, lon = resolver.extract_location(text)
+
+    assert location == "Avenida Sabana Larga"
+    assert lat == 18.482
+    assert lon == -69.85
+    assert_default_geocode_call(geocode, "Avenida Sabana Larga", resolver)
+
+
+def test_extract_location_discards_non_dominican_addresses(monkeypatch):
+    resolver, geocode = build_resolver(monkeypatch)
+    responses = {
+        "Avenida Sabana Larga": make_location(
+            25.774, -80.19, address={"country_code": "us", "country": "United States"}
+        ),
+    }
+    geocode.side_effect = lambda query, **kwargs: responses.get(query)
+
+    text = "Accidente en Avenida Sabana Larga."
+
+    location, lat, lon = resolver.extract_location(text)
+
+    assert location == "Avenida Sabana Larga"
+    assert lat is None
+    assert lon is None
+    assert_default_geocode_call(geocode, "Avenida Sabana Larga", resolver)
