@@ -96,7 +96,5 @@ cython_debug/
 .streamlit/
 
 # Local data and artifacts
-/data/
-data/
 /tmp/
 *.log
