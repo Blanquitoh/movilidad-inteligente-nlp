@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -25,8 +25,16 @@ class _SentimentModel:
 class SentimentAnalyzer:
     """Train and run sentiment predictions using the project CSV dataset."""
 
-    def __init__(self, model: _SentimentModel | None = None) -> None:
+    def __init__(
+        self,
+        model: _SentimentModel | None = None,
+        *,
+        label_aliases: Mapping[str, str] | None = None,
+        emotion_aliases: Mapping[str, str] | None = None,
+    ) -> None:
         self._model = model
+        self._label_aliases = {key.lower(): value for key, value in (label_aliases or {}).items()}
+        self._emotion_aliases = {key.lower(): value for key, value in (emotion_aliases or {}).items()}
 
     @classmethod
     def empty(cls) -> "SentimentAnalyzer":
@@ -35,7 +43,17 @@ class SentimentAnalyzer:
         return cls(model=None)
 
     @classmethod
-    def from_csv(cls, path: str, *, max_features: int = 5000, C: float = 1.0) -> "SentimentAnalyzer":
+    def from_csv(
+        cls,
+        path: str,
+        *,
+        max_features: int = 5000,
+        C: float = 1.0,
+        ngram_range: Sequence[int] | None = None,
+        stopword_exclusions: Sequence[str] | None = None,
+        label_aliases: Mapping[str, str] | None = None,
+        emotion_aliases: Mapping[str, str] | None = None,
+    ) -> "SentimentAnalyzer":
         csv_path = Path(path)
         logger.info("Loading sentiment dataset from {}", csv_path)
         dataframe = pd.read_csv(csv_path)
@@ -48,7 +66,12 @@ class SentimentAnalyzer:
         texts = dataframe["text"].astype(str).tolist()
         sentiments = dataframe["sentiment"].astype(str).tolist()
 
-        pipeline = build_logistic_pipeline(max_features=max_features, C=C)
+        pipeline = build_logistic_pipeline(
+            max_features=max_features,
+            C=C,
+            ngram_range=ngram_range,
+            stopword_exclusions=stopword_exclusions,
+        )
         pipeline.fit(texts, sentiments)
 
         classifier = pipeline.named_steps["classifier"]
@@ -73,7 +96,11 @@ class SentimentAnalyzer:
             labels=labels,
             sentiment_emotions=sentiment_emotions,
         )
-        return cls(model=model)
+        return cls(
+            model=model,
+            label_aliases=label_aliases,
+            emotion_aliases=emotion_aliases,
+        )
 
     def predict(self, texts: Sequence[str]) -> list[SentimentPrediction]:
         if self._model is None:
@@ -94,12 +121,16 @@ class SentimentAnalyzer:
             sentiment = str(self._model.labels[top_index])
             probability = float(proba[top_index])
             emotion = self._model.sentiment_emotions.get(sentiment.lower())
+            sentiment_display = self._label_aliases.get(sentiment.lower(), sentiment)
+            emotion_display = None
+            if emotion:
+                emotion_display = self._emotion_aliases.get(emotion.lower(), emotion)
             predictions.append(
                 SentimentPrediction(
                     text=raw_text,
-                    sentiment=sentiment,
+                    sentiment=sentiment_display,
                     probability=probability,
-                    emotion=emotion,
+                    emotion=emotion_display,
                 )
             )
 

@@ -5,13 +5,81 @@ paths:
   processed_train: data/processed/train.csv
   processed_test: data/processed/test.csv
   model_artifact: artifacts/text_classifier.joblib
+text_preprocessing:
+  stopword_exclusions:
+    - no
+    - sin
+    - ni
+    - nunca
+    - nadie
+    - ninguno
+    - ninguna
 split:
   test_size: 0.2
   random_state: 42
 model:
-  max_features: 5000
-  C: 1.0
+  max_features: 8000
+  C: 1.5
   n_neurons: 0
+  ngram_range:
+    - 1
+    - 2
+  stopword_exclusions:
+    - no
+    - sin
+    - ni
+    - nunca
+sentiment_model:
+  max_features: 6000
+  C: 2.0
+  ngram_range:
+    - 1
+    - 2
+  stopword_exclusions:
+    - no
+    - sin
+    - ni
+  label_aliases:
+    powerful: "motivación y superación"
+    mad: "frustración"
+    peaceful: "tranquilidad"
+    joyful: "alegría"
+    sad: "tristeza"
+    scared: "temor"
+  emotion_aliases:
+    confident: "confianza"
+    relaxed: "relajado"
+    overwhelmed: "abrumado"
+    frustrated: "frustración"
+category_rules:
+  keyword_overrides:
+    - category: "obstaculo"
+      patterns:
+        - "escombro"
+        - "escombros"
+        - "poste caido"
+        - "poste caído"
+        - "arbol caido"
+        - "arbol caído"
+        - "vehiculo varado"
+        - "vehiculo averiado"
+        - "camion varado"
+        - "derrumb"
+        - "bloqueo"
+        - "obstaculo"
+        - "obstaculo en via"
+        - "material en la via"
+    - category: "informativo"
+      patterns:
+        - "sin accidente"
+        - "sin accidentes"
+        - "sin incidentes"
+        - "sin novedades"
+        - "no se reportan accidentes"
+        - "no se reportan incidentes"
+        - "no se reportan heridos"
+        - "no hubo accidentes"
+        - "no registra accidentes"
 logging:
   level: INFO
 recommender:

@@ -53,6 +53,18 @@ class PathsConfig(TypedDict, total=False):
     sentiment_data: str
 
 
+class TextPreprocessingConfig(TypedDict, total=False):
+    stopword_exclusions: list[str]
+
+
+class ModelConfigEntry(TypedDict, total=False):
+    max_features: int
+    C: float
+    n_neurons: int
+    ngram_range: list[int]
+    stopword_exclusions: list[str]
+
+
 class AgeSegmentEntry(TypedDict, total=False):
     label: str
     min: int
@@ -67,12 +79,34 @@ class RecommenderConfig(TypedDict, total=False):
     demographics: DemographicsConfig
 
 
+class SentimentModelConfig(TypedDict, total=False):
+    max_features: int
+    C: float
+    ngram_range: list[int]
+    stopword_exclusions: list[str]
+    label_aliases: dict[str, str]
+    emotion_aliases: dict[str, str]
+
+
+class CategoryRuleEntry(TypedDict, total=False):
+    category: str
+    patterns: list[str]
+
+
+class CategoryRulesConfig(TypedDict, total=False):
+    keyword_overrides: list[CategoryRuleEntry]
+
+
 class MapsConfig(TypedDict, total=False):
     google_api_key: str
 
 
 class AppConfig(TypedDict, total=False):
     paths: PathsConfig
+    text_preprocessing: TextPreprocessingConfig
+    model: ModelConfigEntry
+    sentiment_model: SentimentModelConfig
+    category_rules: CategoryRulesConfig
     recommender: RecommenderConfig
     maps: MapsConfig
     n_suggestions: int
@@ -116,10 +150,45 @@ def load_recommender(path: Path, _age_segmenter: AgeSegmenter | None = None) -> 
 
 
 @st.cache_resource
-def load_sentiment_analyzer(path: Path) -> SentimentAnalyzer:
+def load_sentiment_analyzer(path: Path, params_signature: str = "") -> SentimentAnalyzer:
     logger.info("Loading sentiment analyzer from {}", path)
+    params: dict[str, object] = {}
+    if params_signature:
+        try:
+            params = json.loads(params_signature)
+        except json.JSONDecodeError:
+            logger.warning("Invalid sentiment model configuration; using defaults.")
+            params = {}
     try:
-        return SentimentAnalyzer.from_csv(str(path))
+        max_features = params.get("max_features")
+        if not isinstance(max_features, int):
+            max_features = 5000
+        C_value = params.get("C")
+        if isinstance(C_value, (int, float)):
+            C_float = float(C_value)
+        else:
+            C_float = 1.0
+        ngram_range = params.get("ngram_range")
+        if not isinstance(ngram_range, list):
+            ngram_range = None
+        stopword_exclusions = params.get("stopword_exclusions")
+        if not isinstance(stopword_exclusions, list):
+            stopword_exclusions = None
+        label_aliases = params.get("label_aliases")
+        if not isinstance(label_aliases, dict):
+            label_aliases = None
+        emotion_aliases = params.get("emotion_aliases")
+        if not isinstance(emotion_aliases, dict):
+            emotion_aliases = None
+        return SentimentAnalyzer.from_csv(
+            str(path),
+            max_features=max_features,
+            C=C_float,
+            ngram_range=ngram_range,
+            stopword_exclusions=stopword_exclusions,
+            label_aliases=label_aliases,
+            emotion_aliases=emotion_aliases,
+        )
     except FileNotFoundError:
         logger.warning("Sentiment dataset not found; disabling sentiment predictions.")
     except Exception as exc:  # noqa: BLE001
@@ -148,6 +217,26 @@ def get_google_maps_api_key(config: AppConfig) -> Optional[str]:
     return text_key or None
 
 
+def build_category_resolver_from_config(config: AppConfig) -> KeywordCategoryResolver:
+    category_config = cast(CategoryRulesConfig, config.get("category_rules", {}))
+    overrides = category_config.get("keyword_overrides")
+    if isinstance(overrides, list) and overrides:
+        keyword_map: dict[str, str] = {}
+        for entry in overrides:
+            category = entry.get("category")
+            patterns = entry.get("patterns")
+            if not isinstance(category, str) or not category.strip():
+                continue
+            if not isinstance(patterns, list):
+                continue
+            for pattern in patterns:
+                if isinstance(pattern, str) and pattern.strip():
+                    keyword_map[pattern] = category
+        if keyword_map:
+            return KeywordCategoryResolver(keyword_map=keyword_map)
+    return KeywordCategoryResolver.for_obstacles()
+
+
 def create_use_cases(
     config: AppConfig,
 ) -> tuple[DetectEventsUseCase, RecommendTopicsUseCase, InferInterestsUseCase, AnalyzeSentimentUseCase]:
@@ -157,7 +246,7 @@ def create_use_cases(
     paths: PathsConfig = config["paths"]
     geo_resolver = GeoResolver()
     severity_scorer = KeywordSeverityScorer()
-    category_resolver = KeywordCategoryResolver.for_obstacles()
+    category_resolver = build_category_resolver_from_config(config)
     priority_assessor = TimeSeverityPriorityAssessor()
 
     model_artifact = paths.get("model_artifact")
@@ -186,7 +275,13 @@ def create_use_cases(
         raise KeyError("Configuration 'paths' is missing the 'sentiment_data' entry.")
 
     sentiment_path = Path(sentiment_data)
-    sentiment_analyzer = load_sentiment_analyzer(sentiment_path)
+    sentiment_model_config = cast(SentimentModelConfig, config.get("sentiment_model", {}))
+    sentiment_signature = (
+        json.dumps(sentiment_model_config, sort_keys=True, ensure_ascii=False)
+        if sentiment_model_config
+        else ""
+    )
+    sentiment_analyzer = load_sentiment_analyzer(sentiment_path, sentiment_signature)
     sentiment_use_case = AnalyzeSentimentUseCase(sentiment_analyzer)
 
     detect_use_case = DetectEventsUseCase(

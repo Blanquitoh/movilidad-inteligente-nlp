@@ -37,9 +37,22 @@ def load_config(config_path: Path) -> dict:
         return yaml.safe_load(file)
 
 
-def preprocess(df: pd.DataFrame) -> pd.DataFrame:
-    logger.info("Preprocessing {} rows", len(df))
+def _build_stopwords(stopword_exclusions: Sequence[str] | None = None) -> set[str]:
     stopwords = ensure_stopwords()
+    if stopword_exclusions:
+        exclusions = {value.strip().lower() for value in stopword_exclusions if value}
+        if exclusions:
+            stopwords = {word for word in stopwords if word.lower() not in exclusions}
+    return stopwords
+
+
+def preprocess(
+    df: pd.DataFrame,
+    *,
+    stopword_exclusions: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    logger.info("Preprocessing {} rows", len(df))
+    stopwords = _build_stopwords(stopword_exclusions)
     df = df.copy()
     df["clean_text"] = df["text"].astype(str).apply(lambda text: clean_text(text, stopwords))
     df["category"] = df["category"].astype(str)
@@ -50,7 +63,9 @@ def build_datasets(config: dict) -> None:
     raw_source = config["paths"]["raw_data"]
     df = load_raw_data(raw_source)
     df = normalise_raw_dataframe(df)
-    df = preprocess(df)
+    preprocessing_cfg = config.get("text_preprocessing", {})
+    stopword_exclusions = preprocessing_cfg.get("stopword_exclusions") if isinstance(preprocessing_cfg, dict) else None
+    df = preprocess(df, stopword_exclusions=stopword_exclusions)
 
     split_cfg = config["split"]
     stratify_labels: pd.Series | None = df["category"]

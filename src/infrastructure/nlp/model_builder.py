@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 import joblib
 import numpy as np
@@ -80,18 +80,44 @@ def _clean_batch(texts, stopwords):
     return [clean_text(text, stopwords) for text in texts]
 
 
-def _build_cleaner():
+def _normalise_exclusions(values: Sequence[str] | None) -> set[str]:
+    if not values:
+        return set()
+    return {value.strip().lower() for value in values if value and value.strip()}
+
+
+def _build_cleaner(stopword_exclusions: Sequence[str] | None = None):
     stopwords = ensure_stopwords()
+    exclusions = _normalise_exclusions(stopword_exclusions)
+    if exclusions:
+        stopwords = {word for word in stopwords if word.lower() not in exclusions}
     return FunctionTransformer(
         func=partial(_clean_batch, stopwords=stopwords),
         validate=False,
     )
 
 
-def build_logistic_pipeline(max_features: int, C: float) -> Pipeline:
+def _parse_ngram_range(ngram_range: Sequence[int] | None) -> tuple[int, int]:
+    if not ngram_range:
+        return (1, 1)
+    if len(ngram_range) != 2:
+        raise ValueError("ngram_range must contain exactly two integers: min_n and max_n")
+    start, end = int(ngram_range[0]), int(ngram_range[1])
+    if start < 1 or end < start:
+        raise ValueError("Invalid ngram_range; ensure 1 <= min_n <= max_n")
+    return (start, end)
+
+
+def build_logistic_pipeline(
+    max_features: int,
+    C: float,
+    *,
+    ngram_range: Sequence[int] | None = None,
+    stopword_exclusions: Sequence[str] | None = None,
+) -> Pipeline:
     logger.info("Building logistic regression pipeline")
-    cleaner = _build_cleaner()
-    vectorizer = TfidfVectorizer(max_features=max_features)
+    cleaner = _build_cleaner(stopword_exclusions=stopword_exclusions)
+    vectorizer = TfidfVectorizer(max_features=max_features, ngram_range=_parse_ngram_range(ngram_range))
     classifier = LogisticRegression(C=C, max_iter=1000)
     pipeline = Pipeline(
         steps=[
@@ -103,12 +129,22 @@ def build_logistic_pipeline(max_features: int, C: float) -> Pipeline:
     return pipeline
 
 
-def build_neural_components(max_features: int, n_neurons: int, num_classes: int):
+def build_neural_components(
+    max_features: int,
+    n_neurons: int,
+    num_classes: int,
+    *,
+    ngram_range: Sequence[int] | None = None,
+    stopword_exclusions: Sequence[str] | None = None,
+):
     if keras is None:
         raise RuntimeError("TensorFlow is required for neural pipeline")
 
-    cleaner = _build_cleaner()
-    vectorizer = TfidfVectorizer(max_features=max_features)
+    cleaner = _build_cleaner(stopword_exclusions=stopword_exclusions)
+    vectorizer = TfidfVectorizer(
+        max_features=max_features,
+        ngram_range=_parse_ngram_range(ngram_range),
+    )
 
     model = keras.Sequential(
         [

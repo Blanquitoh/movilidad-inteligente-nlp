@@ -42,13 +42,22 @@ def train_model(config: dict) -> TextClassifierPipeline:
     texts = df["clean_text"].astype(str).tolist()
     labels = df["category"].astype(str).tolist()
 
-    max_features = config["model"]["max_features"]
-    C = config["model"]["C"]
-    n_neurons = config["model"].get("n_neurons", 0)
+    model_cfg = config.get("model", {})
+    max_features = model_cfg.get("max_features", 5000)
+    C = model_cfg.get("C", 1.0)
+    n_neurons = model_cfg.get("n_neurons", 0)
+    ngram_range = model_cfg.get("ngram_range")
+    stopword_exclusions = model_cfg.get("stopword_exclusions")
 
     if n_neurons and n_neurons > 0:
         logger.info("Training neural network with {} neurons", n_neurons)
-        vectorizer, model, label_encoder = build_neural_components(max_features, n_neurons, len(set(labels)))
+        vectorizer, model, label_encoder = build_neural_components(
+            max_features,
+            n_neurons,
+            len(set(labels)),
+            ngram_range=ngram_range,
+            stopword_exclusions=stopword_exclusions,
+        )
         label_encoder.fit(labels)
         y_encoded = label_encoder.transform(labels)
         y_one_hot = np.eye(len(label_encoder.classes_))[y_encoded]
@@ -61,7 +70,12 @@ def train_model(config: dict) -> TextClassifierPipeline:
         estimator.save(artifact_base)
     else:
         logger.info("Training logistic regression classifier")
-        pipeline = build_logistic_pipeline(max_features, C)
+        pipeline = build_logistic_pipeline(
+            max_features,
+            C,
+            ngram_range=ngram_range,
+            stopword_exclusions=stopword_exclusions,
+        )
         pipeline.fit(texts, labels)
         predictions = pipeline.predict(texts)
         estimator = TextClassifierPipeline(pipeline, use_neural=False)
