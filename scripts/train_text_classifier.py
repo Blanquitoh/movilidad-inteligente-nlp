@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
-from src.utils.logger import logger
 from sklearn.metrics import classification_report
 
 if __package__ is None or __package__ == "":
@@ -21,6 +20,7 @@ from scripts.bootstrap import bootstrap_project
 
 _PROJECT_ROOT = bootstrap_project()
 
+from src.utils.logger import logger
 from src.infrastructure.nlp.model_builder import (
     TextClassifierPipeline,
     build_logistic_pipeline,

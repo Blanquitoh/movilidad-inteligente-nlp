@@ -8,7 +8,6 @@ from typing import Sequence
 
 import pandas as pd
 import yaml
-from src.utils.logger import logger
 from sklearn.model_selection import train_test_split
 
 if __package__ is None or __package__ == "":
@@ -21,6 +20,7 @@ from scripts.bootstrap import bootstrap_project
 
 _PROJECT_ROOT = bootstrap_project()
 
+from src.utils.logger import logger
 from src.utils.text_cleaning import clean_text, ensure_stopwords
 
 

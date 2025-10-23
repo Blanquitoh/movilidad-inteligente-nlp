@@ -8,7 +8,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import yaml
-from src.utils.logger import logger
 from sklearn.metrics import classification_report, confusion_matrix
 
 if __package__ is None or __package__ == "":
@@ -21,6 +20,7 @@ from scripts.bootstrap import bootstrap_project
 
 _PROJECT_ROOT = bootstrap_project()
 
+from src.utils.logger import logger
 from src.infrastructure.nlp.model_builder import TextClassifierPipeline
 
 
