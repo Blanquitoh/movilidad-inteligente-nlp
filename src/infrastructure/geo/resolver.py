@@ -8,12 +8,13 @@ from typing import Iterable, Mapping, Optional, Pattern
 
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderServiceError
+from geopy.point import Point
 from loguru import logger
 
 
 TERMINATOR_PATTERN = re.compile(r"[,;:](?:\s|$)")
 CONNECTOR_PATTERN = re.compile(
-    r"\b(?:cuando|donde|porque|por|debido a|tras|después de|luego de|ya que|mientras(?: que)?)\b",
+    r"\b(?:cuando|donde|porque|por|debido a|tras|después de|luego de|ya que|mientras(?: que)?|pr[oó]ximo a|cerca de)\b",
     re.IGNORECASE,
 )
 
@@ -244,8 +245,8 @@ class GeoResolver:
             unique.append(cleaned)
         return unique
 
-    def _format_viewbox(self) -> tuple[float, float, float, float]:
-        """Return the resolver viewbox as (west, south, east, north) floats."""
+    def _format_viewbox(self) -> tuple[Point, Point]:
+        """Return a geopy-compatible bounding box ordered south-west to north-east."""
         (lat1, lon1), (lat2, lon2) = self.viewbox
 
         south = min(lat1, lat2)
@@ -253,7 +254,7 @@ class GeoResolver:
         west = min(lon1, lon2)
         east = max(lon1, lon2)
 
-        return (west, south, east, north)
+        return (Point(latitude=south, longitude=west), Point(latitude=north, longitude=east))
 
     @staticmethod
     def _infer_country_code(address: Mapping[str, object]) -> Optional[str]:
