@@ -41,4 +41,14 @@ class DetectedInterest:
     keywords: tuple[str, ...] = ()
 
 
-__all__ = ["TrafficEvent", "UserProfile", "DetectedInterest"]
+@dataclass(frozen=True)
+class SentimentPrediction:
+    """Predicted sentiment for a given text with optional emotion metadata."""
+
+    text: str
+    sentiment: str
+    probability: float
+    emotion: Optional[str] = None
+
+
+__all__ = ["TrafficEvent", "UserProfile", "DetectedInterest", "SentimentPrediction"]

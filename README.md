@@ -2,6 +2,8 @@
 
 Proyecto modular para detectar y clasificar eventos de tráfico en tweets en español y recomendar intereses de usuario desde una única interfaz en Streamlit. Pensado para presentaciones académicas con énfasis en claridad, trazabilidad y configuración declarativa.
 
+El motor de recomendaciones se alimenta directamente del dataset `data/raw/social_media_preferences.csv`, construyendo el vocabulario de intereses en tiempo real. El análisis de sentimiento se entrena al vuelo con `data/raw/spanish_tweet_sentiment.csv`, por lo que los resultados reflejan siempre el contenido más reciente de esos archivos.
+
 ## Estructura del proyecto
 
 ```

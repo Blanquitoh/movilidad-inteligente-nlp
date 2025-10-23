@@ -1,16 +1,121 @@
 """Simple content-based recommender using keyword overlap."""
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 import re
+import unicodedata
 from typing import Any, Optional, Sequence
 
 import pandas as pd
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 
 from src.core.entities import DetectedInterest, UserProfile
 from src.infrastructure.recommenders.segments import AgeSegmenter
 from src.utils.logger import logger
+from src.utils.text_cleaning import ensure_stopwords
+
+
+_CANDIDATE_TEXT_COLUMNS = (
+    "Post Text",
+    "Hashtags",
+    "User Bio",
+    "User Description 1",
+    "User Description 2",
+)
+
+_PRIORITY_TEXT_COLUMNS = (
+    "Hashtags",
+    "User Bio",
+    "User Description 1",
+    "User Description 2",
+)
+
+
+def _strip_accents(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _normalise_token(token: str) -> str:
+    token = token.strip().lower()
+    if not token:
+        return ""
+    return _strip_accents(token)
+
+
+def _tokenise(text: str) -> list[str]:
+    processed = re.sub(r"(?<=[a-zA-Z])(?=[A-Z])", " ", str(text))
+    processed = processed.replace("#", " ").replace("_", " ")
+    lowered = processed.lower()
+    return re.findall(r"\b[\wáéíóúüñ]+\b", lowered, flags=re.UNICODE)
+
+
+def _build_stopwords() -> set[str]:
+    spanish = ensure_stopwords()
+    english = ENGLISH_STOP_WORDS
+    combined = {_normalise_token(token) for token in spanish.union(english)}
+    combined.discard("")
+    return combined
+
+
+_STOPWORDS = _build_stopwords()
+
+
+@dataclass(frozen=True)
+class _RowTokens:
+    priority: set[str]
+    all: set[str]
+
+
+def _extract_row_tokens(row: pd.Series) -> _RowTokens:
+    priority_tokens: set[str] = set()
+    all_tokens: set[str] = set()
+    for column in _CANDIDATE_TEXT_COLUMNS:
+        if column not in row:
+            continue
+        value = row.get(column)
+        if not value or not isinstance(value, str):
+            continue
+        for token in _tokenise(value):
+            normalised = _normalise_token(token)
+            if len(normalised) <= 2:
+                continue
+            if normalised in _STOPWORDS:
+                continue
+            if not normalised.isalpha():
+                continue
+            all_tokens.add(normalised)
+            if column in _PRIORITY_TEXT_COLUMNS:
+                priority_tokens.add(normalised)
+    return _RowTokens(priority=priority_tokens, all=all_tokens)
+
+
+def _build_document_frequencies(rows_tokens: Sequence[_RowTokens]) -> Counter[str]:
+    doc_freq: Counter[str] = Counter()
+    for tokens in rows_tokens:
+        for token in set(tokens.all):
+            doc_freq[token] += 1
+    return doc_freq
+
+
+def _select_from_tokens(tokens: set[str], doc_freq: Counter[str], total_docs: int) -> Optional[str]:
+    if not tokens:
+        return None
+
+    sorted_tokens = sorted(tokens, key=lambda token: (doc_freq[token], -len(token)))
+    for token in sorted_tokens:
+        share = doc_freq[token] / max(total_docs, 1)
+        if 0 < share <= 0.6:
+            return token
+    return sorted_tokens[0] if sorted_tokens else None
+
+
+def _select_label(row_tokens: _RowTokens, doc_freq: Counter[str], total_docs: int) -> Optional[str]:
+    label = _select_from_tokens(row_tokens.priority, doc_freq, total_docs)
+    if label:
+        return label
+    return _select_from_tokens(row_tokens.all, doc_freq, total_docs)
 
 
 def _coerce_age(value: Any) -> Optional[int]:
@@ -42,29 +147,45 @@ class _InterestLexicon:
 
     @classmethod
     def default(cls) -> "_InterestLexicon":
-        return cls(
-            vocabulary={
-                "deporte": {"deporte", "sport", "sports", "fútbol", "football", "fitness", "gym", "running", "cycling"},
-                "salud": {"salud", "wellness", "health", "bienestar", "yoga", "mindfulness", "meditation"},
-                "cine": {"cine", "movie", "film", "cinema", "película", "hollywood"},
-                "dieta": {"dieta", "diet", "nutrition", "nutricion", "food", "receta", "recipe", "vegan"},
-                "hobby": {"hobby", "travel", "viaje", "photography", "photo", "pets", "reading", "libro", "adventure"},
-            }
-        )
+        return cls(vocabulary={})
+
+    @classmethod
+    def from_dataframe(cls, dataframe: pd.DataFrame) -> "_InterestLexicon":
+        if dataframe.empty:
+            logger.warning("Recommendation dataset is empty; returning empty lexicon.")
+            return cls.default()
+
+        rows_tokens: list[_RowTokens] = []
+        for _, row in dataframe.iterrows():
+            tokens = _extract_row_tokens(row)
+            rows_tokens.append(tokens)
+
+        doc_freq = _build_document_frequencies(rows_tokens)
+        total_docs = len(rows_tokens)
+
+        vocabulary: dict[str, set[str]] = defaultdict(set)
+        for row_tokens in rows_tokens:
+            label = _select_label(row_tokens, doc_freq, total_docs)
+            if not label:
+                continue
+            vocabulary[label].update(row_tokens.all)
+
+        if not vocabulary:
+            logger.warning("Failed to derive lexicon from dataset; returning empty vocabulary.")
+            return cls.default()
+
+        return cls(vocabulary=dict(vocabulary))
 
     def detect(self, text: str) -> set[str]:
-        lowered = text.lower()
-        tokens = set(re.findall(r"\b\w+\b", lowered, flags=re.UNICODE))
+        if not text:
+            return set()
+
+        tokens = {_normalise_token(token) for token in _tokenise(text)}
+        tokens.discard("")
         matches: set[str] = set()
         for category, keywords in self.vocabulary.items():
-            for keyword in keywords:
-                if " " in keyword:
-                    if re.search(rf"\b{re.escape(keyword)}\b", lowered):
-                        matches.add(category)
-                        break
-                elif keyword in tokens:
-                    matches.add(category)
-                    break
+            if tokens.intersection(keywords):
+                matches.add(category)
         return matches
 
 
@@ -82,23 +203,16 @@ class KeywordInterestDetector:
             if not raw_text:
                 continue
 
-            lowered = raw_text.lower()
-            tokens = set(re.findall(r"\b\w+\b", lowered, flags=re.UNICODE))
-            matched_keywords: dict[str, set[str]] = {}
+            tokens = {_normalise_token(token) for token in _tokenise(raw_text)}
+            valid_tokens = {token for token in tokens if token}
 
             for category, keywords in self.lexicon.vocabulary.items():
-                for keyword in keywords:
-                    if " " in keyword:
-                        pattern = rf"\b{re.escape(keyword)}\b"
-                        if re.search(pattern, lowered):
-                            matched_keywords.setdefault(category, set()).add(keyword)
-                    elif keyword in tokens:
-                        matched_keywords.setdefault(category, set()).add(keyword)
-
-            for category, keywords in matched_keywords.items():
+                intersection = valid_tokens.intersection(keywords)
+                if not intersection:
+                    continue
                 aggregated[category] += 1
                 counter = keyword_counts.setdefault(category, Counter())
-                for keyword in keywords:
+                for keyword in intersection:
                     counter[keyword] += 1
 
         detections: list[DetectedInterest] = []
@@ -121,7 +235,8 @@ class ContentBasedRecommender:
         lexicon: _InterestLexicon | None = None,
         age_segmenter: AgeSegmenter | None = None,
     ) -> None:
-        self._lexicon = lexicon or _InterestLexicon.default()
+        catalog = catalog.copy()
+        self._lexicon = lexicon or _InterestLexicon.from_dataframe(catalog)
         self._age_segmenter = age_segmenter or AgeSegmenter.default()
         self._interest_detector = KeywordInterestDetector(self._lexicon)
         self.catalog = self._normalise_catalog(
@@ -140,7 +255,8 @@ class ContentBasedRecommender:
     ) -> "ContentBasedRecommender":
         logger.info("Loading recommendation data from {}", path)
         catalog = pd.read_csv(path)
-        return cls(catalog, lexicon=lexicon, age_segmenter=age_segmenter)
+        derived_lexicon = lexicon or _InterestLexicon.from_dataframe(catalog)
+        return cls(catalog, lexicon=derived_lexicon, age_segmenter=age_segmenter)
 
     @staticmethod
     def _normalise_catalog(

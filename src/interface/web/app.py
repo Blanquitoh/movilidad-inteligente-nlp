@@ -32,14 +32,16 @@ PROJECT_ROOT = bootstrap_project()
 
 from src.utils.logger import logger
 
-from src.core.entities import DetectedInterest, TrafficEvent, UserProfile
+from src.core.entities import DetectedInterest, SentimentPrediction, TrafficEvent, UserProfile
 from src.infrastructure.events.priority import TimeSeverityPriorityAssessor
 from src.infrastructure.geo.resolver import GeoResolver
 from src.infrastructure.nlp.category_rules import KeywordCategoryResolver
 from src.infrastructure.nlp.model_builder import TextClassifierPipeline
+from src.infrastructure.nlp.sentiment_analysis import SentimentAnalyzer
 from src.infrastructure.nlp.severity import KeywordSeverityScorer
 from src.infrastructure.recommenders.content_based import ContentBasedRecommender
 from src.infrastructure.recommenders.segments import AgeSegmenter
+from src.use_cases.analyze_sentiment import AnalyzeSentimentUseCase
 from src.use_cases.detect_events import DetectEventsUseCase
 from src.use_cases.infer_interests import InferInterestsUseCase
 from src.use_cases.recommend_topics import RecommendTopicsUseCase
@@ -48,6 +50,7 @@ from src.use_cases.recommend_topics import RecommendTopicsUseCase
 class PathsConfig(TypedDict, total=False):
     model_artifact: str
     recommendation_data: str
+    sentiment_data: str
 
 
 class AgeSegmentEntry(TypedDict, total=False):
@@ -112,6 +115,18 @@ def load_recommender(path: Path, _age_segmenter: AgeSegmenter | None = None) -> 
         )
 
 
+@st.cache_resource
+def load_sentiment_analyzer(path: Path) -> SentimentAnalyzer:
+    logger.info("Loading sentiment analyzer from {}", path)
+    try:
+        return SentimentAnalyzer.from_csv(str(path))
+    except FileNotFoundError:
+        logger.warning("Sentiment dataset not found; disabling sentiment predictions.")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to initialise sentiment analyzer: {}", exc)
+    return SentimentAnalyzer.empty()
+
+
 def build_age_segmenter(config: AppConfig) -> AgeSegmenter:
     recommender_config = cast(RecommenderConfig, config.get("recommender", {}))
     demographics_config = cast(DemographicsConfig, recommender_config.get("demographics", {}))
@@ -135,7 +150,7 @@ def get_google_maps_api_key(config: AppConfig) -> Optional[str]:
 
 def create_use_cases(
     config: AppConfig,
-) -> tuple[DetectEventsUseCase, RecommendTopicsUseCase, InferInterestsUseCase]:
+) -> tuple[DetectEventsUseCase, RecommendTopicsUseCase, InferInterestsUseCase, AnalyzeSentimentUseCase]:
     if "paths" not in config:
         raise KeyError("Configuration is missing the 'paths' section.")
 
@@ -166,6 +181,14 @@ def create_use_cases(
         _age_segmenter=age_segmenter,
     )
 
+    sentiment_data = paths.get("sentiment_data")
+    if sentiment_data is None:
+        raise KeyError("Configuration 'paths' is missing the 'sentiment_data' entry.")
+
+    sentiment_path = Path(sentiment_data)
+    sentiment_analyzer = load_sentiment_analyzer(sentiment_path)
+    sentiment_use_case = AnalyzeSentimentUseCase(sentiment_analyzer)
+
     detect_use_case = DetectEventsUseCase(
         classifier,
         geo_resolver,
@@ -175,7 +198,7 @@ def create_use_cases(
     )
     recommend_use_case = RecommendTopicsUseCase(recommender)
     infer_interests_use_case = InferInterestsUseCase(recommender)
-    return detect_use_case, recommend_use_case, infer_interests_use_case
+    return detect_use_case, recommend_use_case, infer_interests_use_case, sentiment_use_case
 
 
 def render_event_table(events: Sequence[TrafficEvent]) -> None:
@@ -378,9 +401,27 @@ def _format_detected_interests(interests: Sequence[DetectedInterest]) -> pd.Data
     return pd.DataFrame(rows, columns=["Interés", "Coincidencias", "Palabras clave"])
 
 
+def _format_sentiment_predictions(predictions: Sequence[SentimentPrediction]) -> pd.DataFrame:
+    rows: list[dict[str, str]] = []
+    for prediction in predictions:
+        confidence = f"{prediction.probability:.1%}"
+        emotion = prediction.emotion.capitalize() if prediction.emotion else "—"
+        rows.append(
+            {
+                "Texto": prediction.text,
+                "Sentimiento": prediction.sentiment.capitalize(),
+                "Confianza": confidence,
+                "Emoción asociada": emotion,
+            }
+        )
+
+    return pd.DataFrame(rows, columns=["Texto", "Sentimiento", "Confianza", "Emoción asociada"])
+
+
 def render_recommendation_section(
     recommend_use_case: RecommendTopicsUseCase,
     infer_interests_use_case: InferInterestsUseCase,
+    sentiment_use_case: AnalyzeSentimentUseCase,
     *,
     suggestions_limit: int,
     top_keywords_limit: int,
@@ -423,18 +464,31 @@ def render_recommendation_section(
     age_value: Optional[int] = None if omit_age else int(age_value_input)
     gender_value = None if gender_option == "Prefiero no decirlo" else gender_option.lower()
 
-    with st.spinner("Detectando intereses automáticamente..."):
+    with st.spinner("Analizando publicaciones..."):
         detected_interests = infer_interests_use_case.execute(posts, max_keywords=top_keywords_limit)
+        sentiment_predictions = sentiment_use_case.execute(posts)
 
-    if not detected_interests:
+    if detected_interests:
+        st.markdown("### Intereses detectados automáticamente")
+        interests_table = _format_detected_interests(detected_interests)
+        st.dataframe(interests_table, use_container_width=True)
+    else:
         st.info(
             "No se detectaron intereses en los textos proporcionados. Intenta con publicaciones más descriptivas."
         )
-        return
 
-    st.markdown("### Intereses detectados automáticamente")
-    interests_table = _format_detected_interests(detected_interests)
-    st.dataframe(interests_table, use_container_width=True)
+    if sentiment_predictions:
+        st.markdown("### Análisis de sentimiento")
+        sentiment_table = _format_sentiment_predictions(sentiment_predictions)
+        st.dataframe(sentiment_table, use_container_width=True)
+
+    metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+    metrics_col1.metric("Publicaciones analizadas", len(posts))
+    metrics_col2.metric("Intereses detectados", len(detected_interests))
+    metrics_col3.metric("Sentimientos analizados", len(sentiment_predictions))
+
+    if not detected_interests:
+        return
 
     profile_interests = [interest.name for interest in detected_interests]
     profile = UserProfile(
@@ -446,10 +500,6 @@ def render_recommendation_section(
 
     with st.spinner("Generando recomendaciones personalizadas..."):
         topics = recommend_use_case.execute(profile, top_k=max(1, suggestions_limit))
-
-    col1, col2 = st.columns(2)
-    col1.metric("Publicaciones analizadas", len(posts))
-    col2.metric("Intereses detectados", len(detected_interests))
 
     st.markdown("### Recomendaciones sugeridas")
     if not topics:
@@ -470,7 +520,12 @@ def main() -> None:
     st.title("🚦 Movilidad Inteligente: Detección de eventos de tráfico")
 
     config: AppConfig = load_config(Path("configs/config.yaml"))
-    detect_use_case, recommend_use_case, infer_interests_use_case = create_use_cases(config)
+    (
+        detect_use_case,
+        recommend_use_case,
+        infer_interests_use_case,
+        sentiment_use_case,
+    ) = create_use_cases(config)
     maps_api_key = get_google_maps_api_key(config)
     suggestions_limit = int(config.get("n_suggestions", 5) or 5)
     top_keywords_limit = int(config.get("top_keywords", 5) or 5)
@@ -487,6 +542,7 @@ def main() -> None:
         render_recommendation_section(
             recommend_use_case,
             infer_interests_use_case,
+            sentiment_use_case,
             suggestions_limit=suggestions_limit,
             top_keywords_limit=top_keywords_limit,
         )
