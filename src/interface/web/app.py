@@ -93,19 +93,19 @@ def load_classifier(path: Path) -> TextClassifierPipeline:
 
 
 @st.cache_resource
-def load_recommender(path: Path, age_segmenter: AgeSegmenter | None = None) -> ContentBasedRecommender:
+def load_recommender(path: Path, _age_segmenter: AgeSegmenter | None = None) -> ContentBasedRecommender:
     logger.info("Loading recommender data from {}", path)
     try:
         return ContentBasedRecommender.from_csv(
             str(path),
-            age_segmenter=age_segmenter,
+            age_segmenter=_age_segmenter,
         )
     except FileNotFoundError:
         logger.warning("Recommendation data not found; using empty catalog.")
         empty_catalog = pd.DataFrame(columns=["category", "source_text", "age_segment", "gender"])
         return ContentBasedRecommender(
             empty_catalog,
-            age_segmenter=age_segmenter,
+            age_segmenter=_age_segmenter,
         )
 
 
@@ -158,7 +158,7 @@ def create_use_cases(config: AppConfig) -> tuple[DetectEventsUseCase, RecommendT
     age_segmenter = build_age_segmenter(config)
     recommender: ContentBasedRecommender = load_recommender(
         recommendation_path,
-        age_segmenter=age_segmenter,
+        _age_segmenter=age_segmenter,
     )
 
     detect_use_case = DetectEventsUseCase(
