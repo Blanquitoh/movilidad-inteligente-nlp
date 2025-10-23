@@ -61,3 +61,51 @@ def test_extract_location_stops_at_connectors(monkeypatch):
         "viewbox": resolver.viewbox,
         "bounded": True,
     }
+
+
+def test_extract_location_handles_del_pattern(monkeypatch):
+    resolver, geocode = build_resolver(monkeypatch)
+    geocode.return_value = None
+
+    text = "Colapso del túnel de la Avenida 27 de Febrero con Ortega y Gasset."
+
+    location, lat, lon = resolver.extract_location(text)
+
+    assert location == "túnel de la Avenida 27 de Febrero con Ortega y Gasset"
+    assert lat is None and lon is None
+
+    first_call = geocode.call_args_list[0]
+    assert first_call.args[0] == "túnel de la Avenida 27 de Febrero con Ortega y Gasset"
+
+
+def test_extract_location_handles_entre_pattern(monkeypatch):
+    resolver, geocode = build_resolver(monkeypatch)
+    geocode.return_value = None
+
+    text = (
+        "Tránsito lento reportado entre la Calle Ocho y la Avenida España, "
+        "un camión bloquea parcialmente el carril."
+    )
+
+    location, lat, lon = resolver.extract_location(text)
+
+    assert location == "Calle Ocho y la Avenida España"
+    assert lat is None and lon is None
+
+    first_call = geocode.call_args_list[0]
+    assert first_call.args[0] == "Calle Ocho y la Avenida España"
+
+
+def test_extract_location_handles_elevado_without_preposition(monkeypatch):
+    resolver, geocode = build_resolver(monkeypatch)
+    geocode.return_value = None
+
+    text = "Colapsó el elevado de la 27 con Churchill."
+
+    location, lat, lon = resolver.extract_location(text)
+
+    assert location == "elevado de la 27 con Churchill"
+    assert lat is None and lon is None
+
+    first_call = geocode.call_args_list[0]
+    assert first_call.args[0] == "elevado de la 27 con Churchill"
