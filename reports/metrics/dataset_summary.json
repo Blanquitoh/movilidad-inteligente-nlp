@@ -1,0 +1,45 @@
+{
+  "total_records": 142055,
+  "category_counts": {
+    "informativo": 51034,
+    "obstaculo": 46229,
+    "accidente": 38628,
+    "peligro": 3721,
+    "incidente": 2443
+  },
+  "category_proportions": {
+    "informativo": 0.3593,
+    "obstaculo": 0.3254,
+    "accidente": 0.2719,
+    "peligro": 0.0262,
+    "incidente": 0.0172
+  },
+  "text_length": {
+    "min": 3,
+    "max": 525,
+    "mean": 134.87,
+    "median": 127.0,
+    "std": 47.36
+  },
+  "top_tokens": {
+    "traficocpanama": 69784,
+    "vía": 67653,
+    "altura": 58946,
+    "del": 48624,
+    "panamá": 44586,
+    "dirección": 41726,
+    "accidente": 28296,
+    "tráfico": 27651,
+    "precaución": 26605,
+    "los": 25040,
+    "tránsito": 25030,
+    "sobre": 22530,
+    "registra": 21470,
+    "centro": 20249,
+    "las": 18784
+  },
+  "date_range": {
+    "start": "2014-01-14T08:13:12-05:00",
+    "end": "2022-05-09T18:57:38-05:00"
+  }
+}
