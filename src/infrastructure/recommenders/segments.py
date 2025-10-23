@@ -85,5 +85,10 @@ class AgeSegmenter:
                 return segment.label
         return None
 
+    def labels(self) -> tuple[str, ...]:
+        """Return configured segment labels in evaluation order."""
+
+        return tuple(segment.label for segment in self._segments)
+
 
 __all__ = ["AgeSegment", "AgeSegmenter"]
