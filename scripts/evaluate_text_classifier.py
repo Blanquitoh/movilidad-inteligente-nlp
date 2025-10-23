@@ -8,7 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import yaml
-from loguru import logger
+from src.utils.logger import logger
 from sklearn.metrics import classification_report, confusion_matrix
 
 if __package__ is None or __package__ == "":

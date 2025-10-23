@@ -7,9 +7,10 @@ import re
 from typing import Any, Optional
 
 import pandas as pd
-from loguru import logger
 
 from src.core.entities import UserProfile
+from src.infrastructure.recommenders.segments import AgeSegmenter
+from src.utils.logger import logger
 
 
 def _coerce_age(value: Any) -> Optional[int]:
@@ -31,26 +32,6 @@ def _coerce_age(value: Any) -> Optional[int]:
         return int(float(text))
     except ValueError:
         return None
-
-
-def _age_segment(age: Optional[int]) -> Optional[str]:
-    """Map an integer age to a coarse-grained demographic bucket."""
-
-    if age is None or age < 0:
-        return None
-
-    boundaries = (
-        (18, 24, "18-24"),
-        (25, 34, "25-34"),
-        (35, 44, "35-44"),
-        (45, 54, "45-54"),
-    )
-    for lower, upper, label in boundaries:
-        if lower <= age <= upper:
-            return label
-    if age < boundaries[0][0]:
-        return "under-18"
-    return "55+"
 
 
 @dataclass(frozen=True)
@@ -90,19 +71,41 @@ class _InterestLexicon:
 class ContentBasedRecommender:
     """Recommend topics that overlap with the user's interests."""
 
-    def __init__(self, catalog: pd.DataFrame, lexicon: _InterestLexicon | None = None) -> None:
-        self.catalog = self._normalise_catalog(catalog, lexicon or _InterestLexicon.default())
+    def __init__(
+        self,
+        catalog: pd.DataFrame,
+        lexicon: _InterestLexicon | None = None,
+        age_segmenter: AgeSegmenter | None = None,
+    ) -> None:
+        self._age_segmenter = age_segmenter or AgeSegmenter.default()
+        self.catalog = self._normalise_catalog(
+            catalog,
+            lexicon or _InterestLexicon.default(),
+            age_segmenter=self._age_segmenter,
+        )
 
     @classmethod
-    def from_csv(cls, path: str) -> "ContentBasedRecommender":
+    def from_csv(
+        cls,
+        path: str,
+        *,
+        lexicon: _InterestLexicon | None = None,
+        age_segmenter: AgeSegmenter | None = None,
+    ) -> "ContentBasedRecommender":
         logger.info("Loading recommendation data from {}", path)
         catalog = pd.read_csv(path)
-        return cls(catalog)
+        return cls(catalog, lexicon=lexicon, age_segmenter=age_segmenter)
 
     @staticmethod
-    def _normalise_catalog(catalog: pd.DataFrame, lexicon: _InterestLexicon) -> pd.DataFrame:
+    def _normalise_catalog(
+        catalog: pd.DataFrame,
+        lexicon: _InterestLexicon,
+        age_segmenter: AgeSegmenter | None = None,
+    ) -> pd.DataFrame:
         if catalog.empty:
             return pd.DataFrame(columns=["category", "source_text", "age_segment", "gender"])
+
+        segmenter = age_segmenter or AgeSegmenter.default()
 
         text_columns = [
             column
@@ -127,7 +130,8 @@ class ContentBasedRecommender:
             ]
             text = " ".join(values)
             detected = lexicon.detect(text)
-            age_segment = _age_segment(_coerce_age(row.get("User Age") or row.get("user_age")))
+            age_value = row.get("User Age") or row.get("user_age")
+            age_segment = segmenter.segment(_coerce_age(age_value))
             gender_value = row.get("User Gender") or row.get("user_gender")
             gender = str(gender_value).strip().lower() if pd.notna(gender_value) and str(gender_value).strip() else None
             for category in detected:
@@ -159,7 +163,7 @@ class ContentBasedRecommender:
         )
 
         working_catalog = self.catalog
-        user_segment = _age_segment(user.age)
+        user_segment = self._age_segmenter.segment(user.age)
         if user_segment:
             segmented = working_catalog[working_catalog["age_segment"] == user_segment]
             if not segmented.empty:
@@ -180,6 +184,15 @@ class ContentBasedRecommender:
             subset=["category"]
         )
         return top.head(top_k)["category"].astype(str).tolist()
+
+    def available_topics(self) -> list[str]:
+        if self.catalog.empty:
+            return []
+
+        categories = (
+            self.catalog["category"].dropna().astype(str).str.strip()
+        )
+        return sorted({category for category in categories if category})
 
 
 __all__ = ["ContentBasedRecommender"]

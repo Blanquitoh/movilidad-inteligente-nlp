@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Iterable, Optional, Protocol, Sequence
 
 import pandas as pd
-from loguru import logger
+from src.utils.logger import logger
 
 from src.core.entities import TrafficEvent
 from src.infrastructure.events.priority import PriorityAssessment

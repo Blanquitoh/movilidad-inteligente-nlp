@@ -7,6 +7,7 @@ pd = pytest.importorskip("pandas")
 
 from src.core.entities import UserProfile
 from src.infrastructure.recommenders.content_based import ContentBasedRecommender
+from src.infrastructure.recommenders.segments import AgeSegmenter
 
 
 def test_recommender_normalises_catalog_and_scores_interests() -> None:
@@ -45,3 +46,46 @@ def test_recommender_prioritises_matching_age_segment() -> None:
 
     assert "deporte" in recommendations
     assert "cine" not in recommendations
+
+
+def test_recommender_honours_custom_age_segments() -> None:
+    catalog = pd.DataFrame(
+        {
+            "Post Text": [
+                "Clases de yoga para mejorar tu salud",
+                "Festival de cine clásico en la ciudad",
+            ],
+            "User Age": [35, 70],
+        }
+    )
+
+    segmenter = AgeSegmenter.from_config(
+        [
+            {"label": "adulto", "min": 18, "max": 59},
+            {"label": "senior", "min": 60},
+        ]
+    )
+    recommender = ContentBasedRecommender(catalog, age_segmenter=segmenter)
+
+    senior_user = UserProfile(user_id="senior", interests=["salud", "cine"], age=68)
+    recommendations = recommender.recommend(senior_user, top_k=5)
+
+    assert recommendations == ["cine"]
+
+
+def test_available_topics_are_sorted_and_unique() -> None:
+    catalog = pd.DataFrame(
+        {
+            "Post Text": [
+                "Cine y deporte para todos",
+                "Otra vez deporte y cine en cartelera",
+            ],
+            "User Age": [25, 30],
+        }
+    )
+
+    recommender = ContentBasedRecommender(catalog)
+
+    topics = recommender.available_topics()
+
+    assert topics == ["cine", "deporte"]

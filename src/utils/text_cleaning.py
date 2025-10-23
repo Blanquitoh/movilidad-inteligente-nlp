@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from loguru import logger
+from src.utils.logger import logger
 
 try:  # NLTK is optional at runtime
     import nltk
