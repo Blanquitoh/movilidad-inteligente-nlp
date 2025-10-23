@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 import re
 import unicodedata
-from typing import Any, Optional, Sequence
+from typing import Any, Iterable, Mapping, Optional, Sequence
 
 import pandas as pd
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
@@ -30,6 +30,35 @@ _PRIORITY_TEXT_COLUMNS = (
     "User Description 1",
     "User Description 2",
 )
+
+_INTEREST_TOKEN_HINTS: set[str] = {
+    "arte",
+    "bienestar",
+    "ciencia",
+    "cine",
+    "cultura",
+    "deporte",
+    "deportes",
+    "educacion",
+    "empleo",
+    "finanzas",
+    "gastronomia",
+    "historia",
+    "innovacion",
+    "juegos",
+    "movilidad",
+    "musica",
+    "negocios",
+    "salud",
+    "seguridad",
+    "tecnologia",
+    "tecnologias",
+    "transporte",
+    "turismo",
+    "viajes",
+}
+
+_MAX_SEGMENT_DISTANCE_FOR_FALLBACK = 1
 
 
 def _strip_accents(text: str) -> str:
@@ -66,10 +95,20 @@ _STOPWORDS = _build_stopwords()
 class _RowTokens:
     priority: set[str]
     all: set[str]
+    priority_weights: dict[str, int]
+
+
+_COLUMN_WEIGHTS: dict[str, int] = {
+    "User Description 1": 3,
+    "User Description 2": 3,
+    "User Bio": 3,
+    "Hashtags": 2,
+}
 
 
 def _extract_row_tokens(row: pd.Series) -> _RowTokens:
     priority_tokens: set[str] = set()
+    priority_weights: dict[str, int] = {}
     all_tokens: set[str] = set()
     for column in _CANDIDATE_TEXT_COLUMNS:
         if column not in row:
@@ -77,6 +116,7 @@ def _extract_row_tokens(row: pd.Series) -> _RowTokens:
         value = row.get(column)
         if not value or not isinstance(value, str):
             continue
+        weight = _COLUMN_WEIGHTS.get(column, 1)
         for token in _tokenise(value):
             normalised = _normalise_token(token)
             if len(normalised) <= 2:
@@ -88,7 +128,10 @@ def _extract_row_tokens(row: pd.Series) -> _RowTokens:
             all_tokens.add(normalised)
             if column in _PRIORITY_TEXT_COLUMNS:
                 priority_tokens.add(normalised)
-    return _RowTokens(priority=priority_tokens, all=all_tokens)
+                existing = priority_weights.get(normalised, 0)
+                if weight > existing:
+                    priority_weights[normalised] = weight
+    return _RowTokens(priority=priority_tokens, all=all_tokens, priority_weights=priority_weights)
 
 
 def _build_document_frequencies(rows_tokens: Sequence[_RowTokens]) -> Counter[str]:
@@ -99,23 +142,73 @@ def _build_document_frequencies(rows_tokens: Sequence[_RowTokens]) -> Counter[st
     return doc_freq
 
 
-def _select_from_tokens(tokens: set[str], doc_freq: Counter[str], total_docs: int) -> Optional[str]:
-    if not tokens:
-        return None
+def _rank_tokens(
+    tokens: Iterable[str],
+    doc_freq: Counter[str],
+    total_docs: int,
+    *,
+    weights: Mapping[str, int] | None = None,
+) -> list[str]:
+    unique_tokens = set(tokens)
+    if not unique_tokens:
+        return []
 
-    sorted_tokens = sorted(tokens, key=lambda token: (doc_freq[token], -len(token)))
-    for token in sorted_tokens:
-        share = doc_freq[token] / max(total_docs, 1)
-        if 0 < share <= 0.6:
-            return token
-    return sorted_tokens[0] if sorted_tokens else None
+    return sorted(
+        unique_tokens,
+        key=lambda token: (
+            -(weights or {}).get(token, 0),
+            -(token in _INTEREST_TOKEN_HINTS),
+            -doc_freq[token],
+            len(token),
+            token,
+        ),
+    )
 
 
-def _select_label(row_tokens: _RowTokens, doc_freq: Counter[str], total_docs: int) -> Optional[str]:
-    label = _select_from_tokens(row_tokens.priority, doc_freq, total_docs)
-    if label:
-        return label
-    return _select_from_tokens(row_tokens.all, doc_freq, total_docs)
+def _select_candidate_tokens(
+    row_tokens: _RowTokens,
+    doc_freq: Counter[str],
+    total_docs: int,
+    max_tokens: int = 3,
+) -> list[str]:
+    selected: list[str] = []
+
+    def extend(
+        tokens: Iterable[str],
+        *,
+        weights: Mapping[str, int] | None = None,
+        require_hint: bool,
+    ) -> None:
+        ranked = _rank_tokens(tokens, doc_freq, total_docs, weights=weights)
+        for token in ranked:
+            if token in selected:
+                continue
+            if require_hint and token not in _INTEREST_TOKEN_HINTS:
+                continue
+            selected.append(token)
+            if len(selected) >= max_tokens:
+                return
+
+    extend(
+        row_tokens.priority,
+        weights=row_tokens.priority_weights,
+        require_hint=True,
+    )
+
+    if len(selected) < max_tokens:
+        extend(row_tokens.all, weights=None, require_hint=True)
+
+    if not selected:
+        extend(
+            row_tokens.priority,
+            weights=row_tokens.priority_weights,
+            require_hint=False,
+        )
+
+    if not selected:
+        extend(row_tokens.all, weights=None, require_hint=False)
+
+    return selected
 
 
 def _coerce_age(value: Any) -> Optional[int]:
@@ -165,10 +258,11 @@ class _InterestLexicon:
 
         vocabulary: dict[str, set[str]] = defaultdict(set)
         for row_tokens in rows_tokens:
-            label = _select_label(row_tokens, doc_freq, total_docs)
-            if not label:
+            labels = _select_candidate_tokens(row_tokens, doc_freq, total_docs)
+            if not labels:
                 continue
-            vocabulary[label].update(row_tokens.all)
+            for label in labels:
+                vocabulary[label].update(row_tokens.all)
 
         if not vocabulary:
             logger.warning("Failed to derive lexicon from dataset; returning empty vocabulary.")
@@ -237,7 +331,11 @@ class ContentBasedRecommender:
     ) -> None:
         catalog = catalog.copy()
         self._lexicon = lexicon or _InterestLexicon.from_dataframe(catalog)
+        self._allow_segment_fallback = age_segmenter is None
         self._age_segmenter = age_segmenter or AgeSegmenter.default()
+        self._segment_positions = {
+            label: index for index, label in enumerate(self._age_segmenter.labels())
+        }
         self._interest_detector = KeywordInterestDetector(self._lexicon)
         self.catalog = self._normalise_catalog(
             catalog,
@@ -324,28 +422,74 @@ class ContentBasedRecommender:
             user.age,
         )
 
-        working_catalog = self.catalog
+        primary_catalog = self.catalog
+        fallback_catalog: pd.DataFrame | None = None
         user_segment = self._age_segmenter.segment(user.age)
+
         if user_segment:
-            segmented = working_catalog[working_catalog["age_segment"] == user_segment]
+            segment_index = self._segment_positions.get(user_segment)
+            segmented = self.catalog[self.catalog["age_segment"] == user_segment]
             if not segmented.empty:
-                working_catalog = segmented
+                primary_catalog = segmented
+                if self._allow_segment_fallback:
+                    allowed_segments: set[str] = set()
+                    if segment_index is not None:
+                        for segment_label, index in self._segment_positions.items():
+                            if segment_label == user_segment:
+                                continue
+                            if abs(index - segment_index) <= _MAX_SEGMENT_DISTANCE_FOR_FALLBACK:
+                                allowed_segments.add(segment_label)
+                    fallback_mask = self.catalog["age_segment"].isin(allowed_segments)
+                    fallback_mask |= self.catalog["age_segment"].isna()
+                    if fallback_mask.any():
+                        fallback_catalog = self.catalog[fallback_mask]
+                        if not fallback_catalog.empty:
+                            fallback_catalog = fallback_catalog[~fallback_catalog.index.isin(primary_catalog.index)]
+                            if fallback_catalog.empty:
+                                fallback_catalog = None
+            else:
+                primary_catalog = self.catalog
 
         preference_counts = Counter(interest.lower() for interest in user.interests)
 
-        def score_row(row) -> float:
+        def score_row(row: pd.Series) -> float:
             category = str(row.get("category", "")).strip().lower()
             return preference_counts.get(category, 0)
 
-        scored = working_catalog.assign(score=working_catalog.apply(score_row, axis=1))
-        scored = scored[scored["score"] > 0]
-        if scored.empty:
-            return sorted({category for category in working_catalog["category"]})[:top_k]
+        def compute_recommendations(data: pd.DataFrame) -> list[str]:
+            if data.empty:
+                return []
 
-        top = scored.sort_values(["score", "category"], ascending=[False, True]).drop_duplicates(
-            subset=["category"]
-        )
-        return top.head(top_k)["category"].astype(str).tolist()
+            scored = data.assign(score=data.apply(score_row, axis=1))
+            scored = scored[scored["score"] > 0]
+            if not scored.empty:
+                top = (
+                    scored.sort_values(["score", "category"], ascending=[False, True])
+                    .drop_duplicates(subset=["category"])
+                    .astype({"category": str})
+                )
+                return top["category"].tolist()
+
+            categories = (
+                data["category"].dropna().astype(str).str.strip()
+            )
+            return [category for category in sorted(set(categories)) if category]
+
+        recommendations: list[str] = []
+        for category in compute_recommendations(primary_catalog):
+            if category and category not in recommendations:
+                recommendations.append(category)
+            if len(recommendations) >= top_k:
+                return recommendations[:top_k]
+
+        if fallback_catalog is not None:
+            for category in compute_recommendations(fallback_catalog):
+                if category and category not in recommendations:
+                    recommendations.append(category)
+                if len(recommendations) >= top_k:
+                    break
+
+        return recommendations[:top_k]
 
     def available_topics(self) -> list[str]:
         if self.catalog.empty:
