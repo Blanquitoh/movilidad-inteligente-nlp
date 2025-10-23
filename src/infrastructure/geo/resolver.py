@@ -105,7 +105,10 @@ class GeoResolver:
                     candidate,
                     language="es",
                     country_codes="do",
-                    viewbox=self.viewbox,
+                    viewbox=(
+                        self.viewbox[0][1], self.viewbox[0][0],  # west, north
+                        self.viewbox[1][1], self.viewbox[1][0],  # east, south
+                    ),
                     bounded=True,
                 )
             except (GeocoderServiceError, ValueError) as error:
