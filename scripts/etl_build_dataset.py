@@ -8,7 +8,7 @@ from typing import Sequence
 
 import pandas as pd
 import yaml
-from loguru import logger
+from src.utils.logger import logger
 from sklearn.model_selection import train_test_split
 
 if __package__ is None or __package__ == "":

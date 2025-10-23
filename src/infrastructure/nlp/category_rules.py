@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from loguru import logger
+from src.utils.logger import logger
 
 
 def _normalize(text: str) -> str:

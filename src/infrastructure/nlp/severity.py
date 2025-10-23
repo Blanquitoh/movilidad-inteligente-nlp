@@ -1,7 +1,7 @@
 """Heuristic severity scoring for traffic incidents."""
 from __future__ import annotations
 
-from loguru import logger
+from src.utils.logger import logger
 
 
 class KeywordSeverityScorer:

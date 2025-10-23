@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - exercised when geopy is absent
 
         latitude: float
         longitude: float
-from loguru import logger
+from src.utils.logger import logger
 
 
 TERMINATOR_PATTERN = re.compile(r"[,;:](?:\s|$)")

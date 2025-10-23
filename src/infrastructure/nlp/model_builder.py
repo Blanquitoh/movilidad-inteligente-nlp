@@ -8,7 +8,7 @@ from typing import Iterable
 
 import joblib
 import numpy as np
-from loguru import logger
+from src.utils.logger import logger
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
