@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Sequence, TypedDict, cast
 
@@ -27,7 +28,9 @@ from scripts.bootstrap import bootstrap_project
 PROJECT_ROOT = bootstrap_project()
 
 from src.core.entities import TrafficEvent, UserProfile
+from src.infrastructure.events.priority import TimeSeverityPriorityAssessor
 from src.infrastructure.geo.resolver import GeoResolver
+from src.infrastructure.nlp.category_rules import KeywordCategoryResolver
 from src.infrastructure.nlp.model_builder import TextClassifierPipeline
 from src.infrastructure.nlp.severity import KeywordSeverityScorer
 from src.infrastructure.recommenders.content_based import ContentBasedRecommender
@@ -80,6 +83,8 @@ def create_use_cases(config: AppConfig) -> tuple[DetectEventsUseCase, RecommendT
     paths: PathsConfig = config["paths"]
     geo_resolver = GeoResolver()
     severity_scorer = KeywordSeverityScorer()
+    category_resolver = KeywordCategoryResolver.for_obstacles()
+    priority_assessor = TimeSeverityPriorityAssessor()
 
     model_artifact = paths.get("model_artifact")
     if model_artifact is None:
@@ -98,7 +103,13 @@ def create_use_cases(config: AppConfig) -> tuple[DetectEventsUseCase, RecommendT
     recommendation_path = Path(recommendation_data)
     recommender: ContentBasedRecommender = load_recommender(recommendation_path)
 
-    detect_use_case = DetectEventsUseCase(classifier, geo_resolver, severity_scorer)
+    detect_use_case = DetectEventsUseCase(
+        classifier,
+        geo_resolver,
+        severity_scorer,
+        category_resolver=category_resolver,
+        priority_assessor=priority_assessor,
+    )
     recommend_use_case = RecommendTopicsUseCase(recommender)
     return detect_use_case, recommend_use_case
 
@@ -108,18 +119,30 @@ def render_event_table(events: Sequence[TrafficEvent]) -> None:
         st.info("Ingresa un tweet para detectar eventos.")
         return
 
-    rows: list[dict[str, str | float | None]] = []
-    for event in events:
+    sorted_events = sorted(
+        events,
+        key=lambda event: (
+            event.priority_score if event.priority_score is not None else -1.0,
+            event.created_at or datetime.min,
+        ),
+        reverse=True,
+    )
+
+    rows: list[dict[str, str | float | None | datetime]] = []
+    for event in sorted_events:
         map_link = ""
         if event.latitude is not None and event.longitude is not None:
             map_link = f"https://www.google.com/maps?q={event.latitude},{event.longitude}"
-        row: dict[str, str | float | None] = {
+        row: dict[str, str | float | None | datetime] = {
             "Texto": event.text,
             "Categoría": event.predicted_category,
             "Ubicación": event.location_name or "N/D",
             "Lat": event.latitude,
             "Lon": event.longitude,
             "Severidad": event.severity or "N/A",
+            "Prioridad": event.priority or "N/A",
+            "Puntaje prioridad": event.priority_score,
+            "Creado": event.created_at,
             "Mapa": map_link,
         }
         rows.append(row)
@@ -129,6 +152,10 @@ def render_event_table(events: Sequence[TrafficEvent]) -> None:
         df,
         width="stretch",
         column_config={
+            "Creado": st.column_config.DatetimeColumn("Creado"),
+            "Puntaje prioridad": st.column_config.NumberColumn(
+                "Puntaje prioridad", format="%.2f"
+            ),
             "Mapa": st.column_config.LinkColumn(
                 "Mapa", display_text="Abrir en Google Maps"
             )

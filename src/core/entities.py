@@ -17,6 +17,8 @@ class TrafficEvent:
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     severity: Optional[str] = None
+    priority: Optional[str] = None
+    priority_score: Optional[float] = None
 
 
 @dataclass(frozen=True)

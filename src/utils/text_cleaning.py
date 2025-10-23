@@ -4,8 +4,12 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-import nltk
 from loguru import logger
+
+try:  # NLTK is optional at runtime
+    import nltk
+except ImportError:  # pragma: no cover - exercised when nltk is absent
+    nltk = None  # type: ignore[assignment]
 
 _URL_PATTERN = re.compile(r"https?://\S+|www\.\S+")
 _MENTION_PATTERN = re.compile(r"@[\w_]+")
@@ -17,6 +21,13 @@ _MULTISPACE_PATTERN = re.compile(r"\s+")
 def ensure_stopwords(language: str = "spanish") -> set[str]:
     """Ensure stopwords are available and return the set."""
     fallback = {"de", "la", "en", "el"}
+
+    if nltk is None:
+        logger.warning(
+            "NLTK is not installed; using fallback stopwords for language '%s'", language
+        )
+        return fallback
+
     try:
         nltk.data.find("corpora/stopwords")
     except LookupError:
