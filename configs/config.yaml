@@ -35,3 +35,5 @@ recommender:
         min: 55
 maps:
   google_api_key: ""
+n_suggestions: 5
+top_keywords: 5
