@@ -16,14 +16,30 @@ CONNECTOR_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_ARTICLES_PATTERN = r"(?:la|el|los|las)"
+_LOCATION_HEAD_PATTERN = (
+    r"(?:avenida|av\.?|autopista|aut\.?|calle|c\.?|carretera|circunvalaci[oó]n|circ\.?|marginal|"
+    r"expreso|bulevar|boulevard|puente|t[úu]nel|elevado|malec[oó]n|viaducto|paso\s+a\s+desnivel|"
+    r"kil[oó]metro|km|glorieta|parque|plaza)"
+)
+_LOCATION_BODY_PATTERN = (
+    rf"(?:(?:{_ARTICLES_PATTERN})\s+)?{_LOCATION_HEAD_PATTERN}(?=(?:\s|[,;:.]|$))"
+    rf"(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑüÜ0-9°º.,#-]+)*"
+)
+
 
 @dataclass
 class GeoResolver:
     """Extract location strings from text and resolve to coordinates."""
 
     pattern: Pattern[str] = re.compile(
-        r"en\s+([A-Za-zÁÉÍÓÚáéíóúñÑüÜ0-9°º.,-]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑüÜ0-9°º.,-]+)*)",
+        rf"\b(?:en|sobre|entre|cerca de|frente a|hacia|rumbo a|a la altura de|a la salida de|"
+        rf"por(?:\s+la|\s+el|\s+los|\s+las)?|del|de la|de los|de las)\s+"
+        rf"(?P<location>{_LOCATION_BODY_PATTERN})",
         re.IGNORECASE,
+    )
+    additional_patterns: tuple[Pattern[str], ...] = (
+        re.compile(rf"\b(?P<location>{_LOCATION_BODY_PATTERN})", re.IGNORECASE),
     )
     user_agent: str = "movilidad-inteligente-nlp"
     timeout: int = 5
@@ -38,15 +54,26 @@ class GeoResolver:
             "avenida",
             "autopista",
             "bulevar",
+            "boulevard",
             "carretera",
             "calle",
             "circunvalacion",
             "circunvalación",
             "expreso",
+            "elevado",
+            "kilometro",
+            "kilómetro",
+            "km",
+            "malecón",
+            "malecon",
+            "parque",
+            "paso",
             "marginal",
             "puente",
             "tunel",
             "túnel",
+            "viaducto",
+            "plaza",
         }
     )
     _FALLBACK_LOCALITIES: tuple[str, ...] = (
@@ -63,11 +90,11 @@ class GeoResolver:
 
     def extract_location(self, text: str) -> tuple[Optional[str], Optional[float], Optional[float]]:
         logger.debug("Extracting location from text: {}", text)
-        match = self.pattern.search(text)
+        match = self._match_location(text)
         if not match:
             return None, None, None
 
-        location_name = self._normalize_location_name(match.group(1))
+        location_name = self._normalize_location_name(match)
         logger.debug("Detected location string: {}", location_name)
 
         queries = self._build_candidate_queries(location_name)
@@ -99,6 +126,18 @@ class GeoResolver:
 
         logger.debug("Resolved {} to ({}, {})", location_name, location.latitude, location.longitude)
         return location_name, location.latitude, location.longitude
+
+    def _match_location(self, text: str) -> Optional[str]:
+        for pattern in (self.pattern, *self.additional_patterns):
+            match = pattern.search(text)
+            if not match:
+                continue
+
+            location = match.groupdict().get("location") or match.group(1)
+            if location:
+                return location
+
+        return None
 
     def _normalize_location_name(self, raw_location: str) -> str:
         """Reduce raw regex matches to the most relevant location span."""
