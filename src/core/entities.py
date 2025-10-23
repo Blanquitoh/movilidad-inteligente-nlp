@@ -28,6 +28,8 @@ class UserProfile:
     user_id: str
     interests: list[str]
     recent_interactions: Optional[list[str]] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
 
 
 __all__ = ["TrafficEvent", "UserProfile"]

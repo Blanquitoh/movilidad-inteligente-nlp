@@ -180,7 +180,12 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Recomendaciones personalizadas")
-        synthetic_user = UserProfile(user_id="demo", interests=["deporte", "salud", "cine"])
+        synthetic_user = UserProfile(
+            user_id="demo",
+            interests=["deporte", "salud", "cine"],
+            age=29,
+            gender="male",
+        )
         recommendations = recommend_use_case.execute(synthetic_user, top_k=5)
         st.write("Intereses sugeridos:")
         for topic in recommendations:
