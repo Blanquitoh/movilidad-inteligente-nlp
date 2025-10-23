@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 
@@ -25,7 +25,7 @@ class TimeSeverityPriorityAssessor:
     ) -> None:
         self._high_threshold = high_threshold
         self._medium_threshold = medium_threshold
-        self._now_provider = now_provider or datetime.utcnow
+        self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
         self._severity_weights = {"alta": 2.0, "media": 1.0}
         self._recency_windows: tuple[tuple[timedelta, float], ...] = (
             (timedelta(minutes=30), 2.0),
@@ -60,6 +60,14 @@ class TimeSeverityPriorityAssessor:
             return 0.0
 
         now = reference_time or self._now_provider()
+
+        created_at_tz = getattr(created_at, "tzinfo", None)
+        now_tz = getattr(now, "tzinfo", None)
+
+        if created_at_tz is not None and now_tz is None:
+            now = now.replace(tzinfo=created_at_tz)
+        elif created_at_tz is None and now_tz is not None:
+            created_at = created_at.replace(tzinfo=now_tz)
         if created_at > now:
             created_at = now
 
