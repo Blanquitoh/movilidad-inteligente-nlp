@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
+import pytest
+
+pytest.importorskip("geopy")
+
 from src.infrastructure.geo.resolver import GeoResolver
 
 

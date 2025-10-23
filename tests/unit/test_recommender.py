@@ -1,7 +1,9 @@
 """Unit tests for the content-based recommender."""
 from __future__ import annotations
 
-import pandas as pd
+import pytest
+
+pd = pytest.importorskip("pandas")
 
 from src.core.entities import UserProfile
 from src.infrastructure.recommenders.content_based import ContentBasedRecommender

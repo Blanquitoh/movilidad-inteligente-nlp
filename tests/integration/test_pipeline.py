@@ -1,7 +1,9 @@
 """Integration test for ETL and training pipeline."""
 from __future__ import annotations
 
-import pandas as pd
+import pytest
+
+pd = pytest.importorskip("pandas")
 
 from scripts.etl_build_dataset import build_datasets
 from scripts.train_text_classifier import train_model

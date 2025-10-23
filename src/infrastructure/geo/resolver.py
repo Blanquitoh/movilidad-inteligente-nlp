@@ -3,18 +3,57 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Mapping, Optional, Pattern
 
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderServiceError
-from geopy.point import Point
+try:  # geopy is optional during unit tests
+    from geopy.geocoders import Nominatim
+    from geopy.exc import GeocoderServiceError
+    from geopy.point import Point
+except ImportError:  # pragma: no cover - exercised when geopy is absent
+    Nominatim = None  # type: ignore[assignment]
+
+    class GeocoderServiceError(Exception):
+        """Fallback geocoder error when geopy is unavailable."""
+
+    @dataclass(frozen=True)
+    class Point:  # type: ignore[no-redef]
+        """Lightweight substitute for geopy.point.Point."""
+
+        latitude: float
+        longitude: float
 from loguru import logger
 
 
 TERMINATOR_PATTERN = re.compile(r"[,;:](?:\s|$)")
+_CONNECTORS = (
+    "cuando",
+    "donde",
+    "porque",
+    "por",
+    "debido a",
+    "tras",
+    "después de",
+    "despues de",
+    "luego de",
+    "ya que",
+    "mientras",
+    "mientras que",
+    "próximo a",
+    "proximo a",
+    "cerca de",
+    "a la altura",
+    "a la altura de",
+    "a la altura del",
+    "a la altura de la",
+    "frente a",
+    "frente al",
+    "antes de",
+    "desvío",
+    "desvio",
+)
 CONNECTOR_PATTERN = re.compile(
-    r"\b(?:cuando|donde|porque|por|debido a|tras|después de|luego de|ya que|mientras(?: que)?|pr[oó]ximo a|cerca de)\b",
+    r"\b(?:" + "|".join(re.escape(connector) for connector in _CONNECTORS) + r")\b",
     re.IGNORECASE,
 )
 
@@ -22,7 +61,8 @@ _ARTICLES_PATTERN = r"(?:la|el|los|las)"
 _LOCATION_HEAD_PATTERN = (
     r"(?:avenida|av\.?|autopista|aut\.?|calle|c\.?|carretera|circunvalaci[oó]n|circ\.?|marginal|"
     r"expreso|bulevar|boulevard|puente|t[úu]nel|elevado|malec[oó]n|viaducto|paso\s+a\s+desnivel|"
-    r"kil[oó]metro|km|glorieta|parque|plaza)"
+    r"kil[oó]metro|km|glorieta|parque|plaza|sector|barrio|urbanizaci[oó]n|urb\.?|residencial|"
+    r"peaje|hospital|centro comercial|estaci[oó]n|terminal|kil\.?|km\.)"
 )
 _LOCATION_BODY_PATTERN = (
     rf"(?:(?:{_ARTICLES_PATTERN})\s+)?{_LOCATION_HEAD_PATTERN}(?=(?:\s|[,;:.]|$))"
@@ -35,13 +75,18 @@ class GeoResolver:
     """Extract location strings from text and resolve to coordinates."""
 
     pattern: Pattern[str] = re.compile(
-        rf"\b(?:en|sobre|entre|cerca de|frente a|hacia|rumbo a|a la altura de|a la salida de|"
+        rf"\b(?:en|sobre|entre|cerca de|frente a|frente al|hacia|rumbo a|a la altura(?: del?| de la)?|"
+        rf"a la salida de|a la entrada de|pasando|antes de|despu[eé]s de|"
         rf"por(?:\s+la|\s+el|\s+los|\s+las)?|del|de la|de los|de las)\s+"
         rf"(?P<location>{_LOCATION_BODY_PATTERN})",
         re.IGNORECASE,
     )
     additional_patterns: tuple[Pattern[str], ...] = (
         re.compile(rf"\b(?P<location>{_LOCATION_BODY_PATTERN})", re.IGNORECASE),
+        re.compile(
+            rf"\bkm\s*(?P<location>\d+\s*(?:{_LOCATION_HEAD_PATTERN})?)",
+            re.IGNORECASE,
+        ),
     )
     user_agent: str = "movilidad-inteligente-nlp"
     timeout: int = 5
@@ -86,15 +131,33 @@ class GeoResolver:
         "Santo Domingo Norte",
         "Santo Domingo Oeste",
     )
+    gazetteer: Mapping[str, str] = field(
+        default_factory=lambda: {
+            "puente juan bosch": "Puente Juan Bosch",
+            "puente juan pablo": "Puente Juan Pablo Duarte",
+            "kilometro 9": "Kilómetro 9 Autopista Duarte",
+            "km 9": "Kilómetro 9 Autopista Duarte",
+            "km 13": "Kilómetro 13 Autopista Duarte",
+            "plaza de la bandera": "Plaza de la Bandera",
+            "estacion mam": "Estación Mamá Tingó",
+        }
+    )
 
     def __post_init__(self) -> None:
+        if Nominatim is None:
+            msg = "geopy must be installed to use GeoResolver"
+            raise RuntimeError(msg)
+
         self._geolocator = Nominatim(user_agent=self.user_agent, timeout=self.timeout)
 
     def extract_location(self, text: str) -> tuple[Optional[str], Optional[float], Optional[float]]:
         logger.debug("Extracting location from text: {}", text)
         match = self._match_location(text)
         if not match:
-            return None, None, None
+            logger.debug("No regex match found; attempting gazetteer lookup")
+            match = self._lookup_gazetteer(text)
+            if not match:
+                return None, None, None
 
         location_name = self._normalize_location_name(match)
         logger.debug("Detected location string: {}", location_name)
@@ -144,6 +207,13 @@ class GeoResolver:
 
         return None
 
+    def _lookup_gazetteer(self, text: str) -> Optional[str]:
+        normalized = self._strip_accents(text.lower())
+        for needle, location in self.gazetteer.items():
+            if needle in normalized:
+                return location
+        return None
+
     def _normalize_location_name(self, raw_location: str) -> str:
         """Reduce raw regex matches to the most relevant location span."""
 
@@ -187,6 +257,8 @@ class GeoResolver:
             (r"\bpuent(?:e)?(?=\s|[,;]|$)", "Puente"),
             (r"\bcirc(?:\.|unv\.?|unvalaci[oó]n)(?=\s|[,;]|$)", "Circunvalación"),
             (r"\bexp(?:\.|reso)?(?=\s|[,;]|$)", "Expreso"),
+            (r"\burb(?:\.|anizaci[oó]n)?(?=\s|[,;]|$)", "Urbanización"),
+            (r"\bresid\.(?=\s|[,;]|$)", "Residencial"),
         )
 
         expanded = location
